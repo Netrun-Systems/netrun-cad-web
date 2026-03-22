@@ -33,14 +33,21 @@ import { DEFAULT_BASEMAP, renderBasemap } from '../Basemap/BasemapRenderer';
 import { ProjectBar } from '../ProjectManager/ProjectBar';
 import type { NetrunCADProject } from '../../services/google-drive';
 import type { NewProjectOptions } from '../ProjectManager/NewProjectDialog';
+import { CommandLine } from '../CommandLine/CommandLine';
+import { ContextMenu, type ContextMenuEntry } from '../ContextMenu/ContextMenu';
+import { StatusBar } from '../StatusBar/StatusBar';
+import { findCommand, getShortAlias } from '../../engine/commands';
 
 let plantPlaceId = 1;
+
+// Long-press duration for iPad right-click emulation (ms)
+const LONG_PRESS_MS = 600;
 
 export const CADCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
 
-  // App state
+  // ── App state ──────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<AppMode>('cad');
   const [cadTool, setCadTool] = useState<CADTool>('line');
   const [elements, setElements] = useState<CADElement[]>([]);
@@ -82,12 +89,34 @@ export const CADCanvas: React.FC = () => {
 
   const { grid, toggleGrid, toggleSnap } = useGrid();
 
-  // Show layer panel
+  // Layer panel
   const [showLayers, setShowLayers] = useState(false);
 
   // Basemap state
   const [basemap, setBasemap] = useState<BasemapState>(DEFAULT_BASEMAP);
   const [showBasemapPanel, setShowBasemapPanel] = useState(false);
+
+  // Ortho mode (F8 / ORTHO command)
+  const [orthoMode, setOrthoMode] = useState(false);
+
+  // ── Command line state ─────────────────────────────────────────────────────
+  const [cmdFocused, setCmdFocused] = useState(false);
+  const [cmdPrompt, setCmdPrompt] = useState('Command:');
+  const [cmdHistory, setCmdHistory] = useState<string[]>([
+    'Welcome to Netrun CAD  |  Type a command or alias and press Enter',
+    'Press Enter or click here to focus the command line',
+    'Esc cancels  |  Tab completes  |  ? for help',
+  ]);
+  const [lastAction, setLastAction] = useState<string | null>(null);
+
+  // ── Context menu state ─────────────────────────────────────────────────────
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  // ── Cursor coordinates for status bar ──────────────────────────────────────
+  const [cursorX, setCursorX] = useState(0);
+  const [cursorY, setCursorY] = useState(0);
 
   const handleBasemapChange = useCallback((updates: Partial<BasemapState>) => {
     setBasemap((prev) => ({ ...prev, ...updates }));
@@ -113,7 +142,262 @@ export const CADCanvas: React.FC = () => {
     [elements]
   );
 
-  // Convert pointer event to canvas coordinates
+  // Undo helper
+  const doUndo = useCallback(() => {
+    setHistoryState((h) => {
+      const next = undo(h);
+      setElements(next.present);
+      return next;
+    });
+  }, []);
+
+  // Redo helper
+  const doRedo = useCallback(() => {
+    setHistoryState((h) => {
+      const next = redo(h);
+      setElements(next.present);
+      return next;
+    });
+  }, []);
+
+  // Delete last element
+  const doDelete = useCallback(() => {
+    setElements((prev) => {
+      const next = prev.slice(0, -1);
+      setHistoryState((h) => pushState(h, next));
+      return next;
+    });
+  }, []);
+
+  // ── executeCommand — maps action IDs to real state changes ────────────────
+  const executeCommand = useCallback(
+    (action: string) => {
+      setLastAction(action);
+      switch (action) {
+        // Draw tools
+        case 'tool:line':        setMode('cad'); setCadTool('line');        break;
+        case 'tool:circle':      setMode('cad'); setCadTool('circle');      break;
+        case 'tool:rectangle':   setMode('cad'); setCadTool('rectangle');   break;
+        case 'tool:dimension':   setMode('cad'); setCadTool('dimension');   break;
+        case 'tool:select':      setMode('cad'); setCadTool('select');      break;
+        case 'tool:move':        setMode('cad'); setCadTool('move');        break;
+
+        // Unimplemented CAD tools — acknowledge but no-op until implemented
+        case 'tool:polyline':
+        case 'tool:arc':
+        case 'tool:ellipse':
+        case 'tool:spline':
+        case 'tool:xline':
+        case 'tool:ray':
+        case 'tool:polygon':
+        case 'tool:donut':
+        case 'tool:hatch':
+        case 'tool:boundary':
+        case 'tool:region':
+        case 'tool:point':
+        case 'tool:mline':
+        case 'tool:revcloud':
+        case 'tool:wipeout':
+        case 'tool:copy':
+        case 'tool:rotate':
+        case 'tool:scale':
+        case 'tool:stretch':
+        case 'tool:trim':
+        case 'tool:extend':
+        case 'tool:fillet':
+        case 'tool:chamfer':
+        case 'tool:array':
+        case 'tool:mirror':
+        case 'tool:offset':
+        case 'tool:break':
+        case 'tool:join':
+        case 'tool:lengthen':
+        case 'tool:pedit':
+        case 'tool:textedit':
+        case 'tool:explode':
+        case 'tool:align':
+        case 'tool:change':
+        case 'tool:dim:aligned':
+        case 'tool:dim:angular':
+        case 'tool:dim:radius':
+        case 'tool:dim:diameter':
+        case 'tool:dim:continue':
+        case 'tool:dim:baseline':
+        case 'tool:dim:leader':
+        case 'tool:dim:tolerance':
+        case 'tool:dim:override':
+        case 'block:define':
+        case 'block:insert':
+        case 'block:wblock':
+        case 'block:edit':
+        case 'file:xref':
+          setMode('cad');
+          setCmdPrompt(`${action} — not yet implemented`);
+          break;
+
+        // Modes
+        case 'mode:text':   setMode('text');  break;
+        case 'mode:draw':   setMode('draw');  break;
+        case 'mode:color':  setMode('color'); break;
+        case 'pan':         setMode('cad');   setCadTool('select'); break;
+
+        // Edit
+        case 'undo':         doUndo();  break;
+        case 'redo':         doRedo();  break;
+        case 'delete':       doDelete(); break;
+        case 'select:all':   /* future */ break;
+        case 'edit:copy':    /* future — clipboard */ break;
+        case 'edit:cut':     /* future */ break;
+        case 'edit:paste':   /* future */ break;
+        case 'panel:properties': /* future */ break;
+
+        // Display
+        case 'zoom:in':
+          setView((v) => ({ ...v, zoom: Math.min(v.zoom * 1.5, 32) }));
+          break;
+        case 'zoom:out':
+          setView((v) => ({ ...v, zoom: Math.max(v.zoom / 1.5, 0.05) }));
+          break;
+        case 'zoom:all':
+          setView({ offsetX: 0, offsetY: 0, zoom: 1 });
+          break;
+        case 'zoom:window':  /* future — rubber-band zoom */ break;
+        case 'zoom:previous': /* future */ break;
+        case 'view:regen':   /* force re-render — already continuous */ break;
+        case 'ortho:toggle': setOrthoMode((o) => !o); break;
+
+        // Grid / Snap
+        case 'grid:toggle':  toggleGrid();  break;
+        case 'snap:toggle':  toggleSnap();  break;
+        case 'settings:units':   /* future */ break;
+        case 'settings:limits':  /* future */ break;
+        case 'settings:drafting': /* future */ break;
+
+        // Layer
+        case 'layer:dialog': setShowLayers((s) => !s); break;
+
+        // Text
+        case 'text:style':   /* future */ break;
+        case 'text:spell':   /* future */ break;
+        case 'text:find':    /* future */ break;
+
+        // File
+        case 'file:new':
+          setElements([]);
+          setHistoryState(createHistory([]));
+          setView({ offsetX: 0, offsetY: 0, zoom: 1 });
+          break;
+        case 'file:save':    /* handled by ProjectBar */ break;
+        case 'file:saveas':  /* handled by ProjectBar */ break;
+        case 'file:open':    /* handled by ProjectBar */ break;
+        case 'file:pdf':     /* handled by ImportExport */ break;
+        case 'file:export':  /* handled by ImportExport */ break;
+        case 'file:import':  /* handled by ImportExport */ break;
+        case 'file:close':   /* no-op in web */ break;
+        case 'file:clearall':
+          setElements([]);
+          setHistoryState(createHistory([]));
+          break;
+
+        // Landscape
+        case 'panel:plants':    setShowPlantPanel((s) => !s); break;
+        case 'basemap:toggle':  setBasemap((b) => ({ ...b, enabled: !b.enabled })); break;
+        case 'file:scan':       /* handled by ImportExport */ break;
+        case 'file:gis':        /* handled by ImportExport */ break;
+
+        case 'help':
+          setCmdHistory((h) => [
+            ...h,
+            'Commands: L=Line C=Circle R=Rect A=Arc D=Dim T=Text M=Move E=Erase',
+            'Z/ZI=ZoomIn ZO=ZoomOut ZA=ZoomAll G=Grid OS=Snap LA=Layers',
+            'SAVE SAVEAS OPEN PLOT PLANT BASEMAP SCAN GIS UNDO REDO',
+          ]);
+          break;
+
+        default:
+          break;
+      }
+    },
+    [doUndo, doRedo, doDelete, toggleGrid, toggleSnap]
+  );
+
+  // ── Command line: handle user input ───────────────────────────────────────
+  const handleCommandExecute = useCallback(
+    (input: string) => {
+      const trimmed = input.trim().toLowerCase();
+      const cmd = findCommand(trimmed);
+
+      if (cmd) {
+        const shortAlias = getShortAlias(cmd.action);
+        setCmdHistory((h) => [
+          ...h,
+          `${shortAlias}  →  ${cmd.description}`,
+        ]);
+        setCmdPrompt('Command:');
+        executeCommand(cmd.action);
+      } else {
+        setCmdHistory((h) => [...h, `Unknown command: ${input.toUpperCase()}`]);
+      }
+    },
+    [executeCommand]
+  );
+
+  const handleCommandCancel = useCallback(() => {
+    setCmdPrompt('Command:');
+  }, []);
+
+  // ── Context menu items ─────────────────────────────────────────────────────
+  const buildContextMenuItems = useCallback((): ContextMenuEntry[] => {
+    const hasElements = elements.length > 0;
+    const items: ContextMenuEntry[] = [
+      {
+        label: lastAction ? `Repeat ${getShortAlias(lastAction)}` : 'Repeat Last',
+        action: 'repeat',
+        disabled: !lastAction,
+      },
+      { separator: true },
+      { label: 'Undo', action: 'undo', disabled: false },
+      { label: 'Redo', action: 'redo', disabled: false },
+      { separator: true },
+      { label: 'Pan', action: 'pan' },
+      { label: 'Zoom In', action: 'zoom:in' },
+      { label: 'Zoom Out', action: 'zoom:out' },
+      { label: 'Zoom to Fit', action: 'zoom:all' },
+      { separator: true },
+      { label: 'Delete Last Element', action: 'delete', disabled: !hasElements },
+    ];
+    return items;
+  }, [elements.length, lastAction]);
+
+  const handleContextMenuAction = useCallback(
+    (action: string) => {
+      if (action === 'repeat' && lastAction) {
+        executeCommand(lastAction);
+      } else {
+        executeCommand(action);
+      }
+      setContextMenu(null);
+    },
+    [executeCommand, lastAction]
+  );
+
+  // ── Long-press for iPad right-click emulation ──────────────────────────────
+  const startLongPress = useCallback((x: number, y: number) => {
+    longPressStartRef.current = { x, y };
+    longPressTimerRef.current = setTimeout(() => {
+      setContextMenu({ x, y });
+    }, LONG_PRESS_MS);
+  }, []);
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    longPressStartRef.current = null;
+  }, []);
+
+  // ── Convert pointer event to canvas coordinates ────────────────────────────
   const getCanvasPoint = useCallback(
     (e: PointerEvent): StrokePoint => {
       const canvas = canvasRef.current!;
@@ -132,7 +416,7 @@ export const CADCanvas: React.FC = () => {
     [view]
   );
 
-  // CAD tools
+  // ── CAD tools ──────────────────────────────────────────────────────────────
   const { handleCADDown, handleCADMove, handleCADUp } = useCADTools({
     activeTool: cadTool,
     activeLayerId: getActiveLayer(),
@@ -165,12 +449,11 @@ export const CADCanvas: React.FC = () => {
   const isPanningRef = useRef(false);
   const lastPointRef = useRef<StrokePoint | null>(null);
 
-  // Pointer event handlers — dispatch based on mode
+  // ── Stroke callbacks dispatched from usePointerEvents ─────────────────────
   const onStrokeStart = useCallback(
     (point: StrokePoint) => {
       if (mode === 'cad') {
         if (cadTool === 'select' || cadTool === 'move') {
-          // Pan mode
           isPanningRef.current = true;
           const canvas = canvasRef.current!;
           const rect = canvas.getBoundingClientRect();
@@ -182,7 +465,6 @@ export const CADCanvas: React.FC = () => {
       } else if (mode === 'draw' || mode === 'color') {
         handleDrawStart(point);
       } else if (mode === 'text') {
-        // Place text at click point
         if (textInput.trim()) {
           const el: TextElement = {
             type: 'text',
@@ -205,6 +487,10 @@ export const CADCanvas: React.FC = () => {
   const onStrokeMove = useCallback(
     (point: StrokePoint) => {
       lastPointRef.current = point;
+      // Update cursor position for status bar
+      setCursorX(point.x);
+      setCursorY(point.y);
+
       if (isPanningRef.current) {
         const canvas = canvasRef.current!;
         const rect = canvas.getBoundingClientRect();
@@ -233,7 +519,7 @@ export const CADCanvas: React.FC = () => {
     }
   }, [mode, handleCADUp, handleDrawEnd, endPan]);
 
-  // Pointer events hook — but we need raw events for two-finger detection
+  // Pointer events hook
   const { handlePointerDown: ptrDown, handlePointerMove: ptrMove, handlePointerUp: ptrUp } =
     usePointerEvents({
       onStrokeStart,
@@ -242,18 +528,26 @@ export const CADCanvas: React.FC = () => {
       getCanvasPoint,
     });
 
-  // Handle canvas pointer events with two-finger pan detection
+  // ── Canvas pointer events — two-finger pan + long-press context menu ───────
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const pe = e.nativeEvent;
       twoFingerRef.current.set(pe.pointerId, { x: pe.clientX, y: pe.clientY });
 
       if (twoFingerRef.current.size === 2) {
-        // Two fingers — enter pan mode
         isPanningRef.current = true;
         startPan(pe.clientX, pe.clientY);
+        cancelLongPress();
         return;
       }
+
+      // Start long-press timer for iPad context menu
+      if (pe.pointerType === 'touch') {
+        startLongPress(pe.clientX, pe.clientY);
+      }
+
+      // Close context menu on canvas tap
+      setContextMenu(null);
 
       // Plant placement
       if (selectedPlantId && mode === 'cad') {
@@ -267,18 +561,26 @@ export const CADCanvas: React.FC = () => {
           scale: 1,
         };
         addElement(placement);
+        cancelLongPress();
         return;
       }
 
       ptrDown(pe);
     },
-    [ptrDown, startPan, selectedPlantId, mode, getCanvasPoint, addElement]
+    [ptrDown, startPan, selectedPlantId, mode, getCanvasPoint, addElement, startLongPress, cancelLongPress]
   );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const pe = e.nativeEvent;
       twoFingerRef.current.set(pe.pointerId, { x: pe.clientX, y: pe.clientY });
+
+      // Cancel long-press if finger moved
+      if (longPressStartRef.current) {
+        const dx = pe.clientX - longPressStartRef.current.x;
+        const dy = pe.clientY - longPressStartRef.current.y;
+        if (Math.hypot(dx, dy) > 8) cancelLongPress();
+      }
 
       if (twoFingerRef.current.size === 2 && isPanningRef.current) {
         movePan(pe.clientX, pe.clientY);
@@ -287,13 +589,14 @@ export const CADCanvas: React.FC = () => {
 
       ptrMove(pe);
     },
-    [ptrMove, movePan]
+    [ptrMove, movePan, cancelLongPress]
   );
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const pe = e.nativeEvent;
       twoFingerRef.current.delete(pe.pointerId);
+      cancelLongPress();
 
       if (twoFingerRef.current.size < 2 && isPanningRef.current) {
         isPanningRef.current = false;
@@ -302,71 +605,127 @@ export const CADCanvas: React.FC = () => {
 
       ptrUp(pe);
     },
-    [ptrUp, endPan]
+    [ptrUp, endPan, cancelLongPress]
   );
 
-  // Keyboard shortcuts
+  // Native right-click context menu
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      e.preventDefault();
+      setContextMenu({ x: e.clientX, y: e.clientY });
+    },
+    []
+  );
+
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      // When command line is focused, only intercept Escape
+      if (cmdFocused) {
+        if (e.key === 'Escape') {
+          setCmdFocused(false);
+          setCmdPrompt('Command:');
+        }
+        return; // All other keys go to command line
+      }
 
-      // Undo/Redo
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+      // If typing in any other input, ignore
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
+      // ── Enter → focus command line ───────────────────────────────────────
+      if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        if (e.shiftKey) {
-          setHistoryState((h) => {
-            const next = redo(h);
-            setElements(next.present);
-            return next;
-          });
+        // Repeat last command on Enter if nothing typed
+        if (lastAction) {
+          executeCommand(lastAction);
         } else {
-          setHistoryState((h) => {
-            const next = undo(h);
-            setElements(next.present);
-            return next;
-          });
+          setCmdFocused(true);
         }
         return;
       }
 
-      // Mode shortcuts
-      if (e.key === '1') setMode('cad');
-      if (e.key === '2') setMode('draw');
-      if (e.key === '3') setMode('color');
-      if (e.key === '4') setMode('text');
-
-      // CAD tool shortcuts
-      if (mode === 'cad') {
-        if (e.key === 'v') setCadTool('select');
-        if (e.key === 'l') setCadTool('line');
-        if (e.key === 'r') setCadTool('rectangle');
-        if (e.key === 'c') setCadTool('circle');
-        if (e.key === 'd') setCadTool('dimension');
-        if (e.key === 'g') toggleGrid();
-        if (e.key === 's' && !e.metaKey && !e.ctrlKey) toggleSnap();
+      // ── Escape → cancel and unfocus ──────────────────────────────────────
+      if (e.key === 'Escape') {
+        setCmdFocused(false);
+        setCmdPrompt('Command:');
+        return;
       }
 
-      // Reset view
+      // ── Undo/Redo ────────────────────────────────────────────────────────
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          doRedo();
+        } else {
+          doUndo();
+        }
+        return;
+      }
+
+      // ── Function keys (AutoCAD standard) ─────────────────────────────────
+      if (e.key === 'F2') { e.preventDefault(); toggleSnap(); return; }
+      if (e.key === 'F3') { e.preventDefault(); toggleSnap(); return; }
+      if (e.key === 'F7') { e.preventDefault(); toggleGrid(); return; }
+      if (e.key === 'F8') { e.preventDefault(); setOrthoMode((o) => !o); return; }
+
+      // ── Mode shortcuts 1-4 ───────────────────────────────────────────────
+      if (e.key === '1') { setMode('cad');   return; }
+      if (e.key === '2') { setMode('draw');  return; }
+      if (e.key === '3') { setMode('color'); return; }
+      if (e.key === '4') { setMode('text');  return; }
+
+      // ── CAD tool shortcuts (single keys, only in cad mode) ────────────────
+      if (mode === 'cad') {
+        if (e.key === 'v' || e.key === 'V') { setCadTool('select');    return; }
+        if (e.key === 'l' || e.key === 'L') { setCadTool('line');      return; }
+        if (e.key === 'r' || e.key === 'R') { setCadTool('rectangle'); return; }
+        if (e.key === 'c' || e.key === 'C') { setCadTool('circle');    return; }
+        if (e.key === 'd' || e.key === 'D') { setCadTool('dimension'); return; }
+        if (e.key === 'g' || e.key === 'G') { toggleGrid(); return; }
+        if (e.key === 's' && !e.metaKey && !e.ctrlKey) { toggleSnap(); return; }
+      }
+
+      // ── Reset view Cmd/Ctrl+0 ──────────────────────────────────────────────
       if (e.key === '0' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         resetView();
+        return;
       }
 
-      // Delete last element
+      // ── Delete last element ────────────────────────────────────────────────
       if (e.key === 'Backspace' || e.key === 'Delete') {
-        setElements((prev) => {
-          const next = prev.slice(0, -1);
-          setHistoryState((h) => pushState(h, next));
-          return next;
-        });
+        doDelete();
+        return;
+      }
+
+      // ── Space / any letter key → open command line and start typing ─────────
+      // (AutoCAD behavior: typing a letter while idle opens the command line)
+      if (
+        e.key.length === 1 &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        /^[a-zA-Z]$/.test(e.key)
+      ) {
+        // Don't intercept mode keys that were already handled above
+        e.preventDefault();
+        setCmdFocused(true);
+        // Pre-seed the command line with the pressed key
+        // We dispatch a fake event to the input via a custom event after render
+        window.dispatchEvent(new CustomEvent('cmdline:seed', { detail: e.key.toLowerCase() }));
       }
     };
 
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [mode, toggleGrid, toggleSnap, resetView]);
+  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand]);
 
-  // Canvas resize handler
+  // ── Canvas resize handler ──────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -384,7 +743,7 @@ export const CADCanvas: React.FC = () => {
     return () => window.removeEventListener('resize', resize);
   }, []);
 
-  // Wheel handler
+  // ── Wheel handler ──────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -393,7 +752,7 @@ export const CADCanvas: React.FC = () => {
     return () => canvas.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
-  // Render loop
+  // ── Render loop ────────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -405,42 +764,27 @@ export const CADCanvas: React.FC = () => {
       const width = canvas.width / dpr;
       const height = canvas.height / dpr;
 
-      // Combine committed elements + preview
       const allElements = preview ? [...elements, preview] : elements;
 
       if (basemap.enabled) {
-        // Clear and fill dark background first, then draw tiles on top
         const dprPre = window.devicePixelRatio || 1;
         ctx.setTransform(dprPre, 0, 0, dprPre, 0, 0);
         ctx.clearRect(0, 0, width, height);
         ctx.fillStyle = '#12121f';
         ctx.fillRect(0, 0, width, height);
 
-        // Draw satellite tiles
         ctx.save();
         ctx.translate(view.offsetX, view.offsetY);
         ctx.scale(view.zoom, view.zoom);
-        renderBasemap(
-          ctx,
-          basemap,
-          view.offsetX,
-          view.offsetY,
-          view.zoom,
-          width,
-          height,
-          () => {
-            // Tile loaded — next animation frame will pick it up
-          }
-        );
+        renderBasemap(ctx, basemap, view.offsetX, view.offsetY, view.zoom, width, height, () => {});
         ctx.restore();
 
-        // Render CAD elements without re-clearing (skipBackground=true)
         renderAll(ctx, allElements, layers, view, grid, width, height, true);
       } else {
         renderAll(ctx, allElements, layers, view, grid, width, height, false);
       }
 
-      // Render live freehand stroke on top
+      // Live freehand stroke
       if (liveStrokePoints.length > 1) {
         ctx.save();
         const dpr2 = window.devicePixelRatio || 1;
@@ -479,11 +823,6 @@ export const CADCanvas: React.FC = () => {
         ctx.restore();
       }
 
-      // Draw plant cursor if plant selected
-      if (selectedPlantId) {
-        // Handled via CSS cursor for now
-      }
-
       animFrameRef.current = requestAnimationFrame(render);
     };
 
@@ -491,22 +830,16 @@ export const CADCanvas: React.FC = () => {
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap]);
 
-  // Save to localStorage periodically
+  // ── localStorage persistence ───────────────────────────────────────────────
   useEffect(() => {
     const timer = setInterval(() => {
       try {
-        localStorage.setItem(
-          'netrun-cad-state',
-          JSON.stringify({ elements, layers, view, grid })
-        );
-      } catch {
-        // localStorage full — skip
-      }
+        localStorage.setItem('netrun-cad-state', JSON.stringify({ elements, layers, view, grid }));
+      } catch { /* localStorage full */ }
     }, 5000);
     return () => clearInterval(timer);
   }, [elements, layers, view, grid]);
 
-  // Load from localStorage on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem('netrun-cad-state');
@@ -515,9 +848,7 @@ export const CADCanvas: React.FC = () => {
         if (state.elements) setElements(state.elements);
         if (state.view) setView(state.view);
       }
-    } catch {
-      // ignore parse errors
-    }
+    } catch { /* ignore */ }
   }, []);
 
   const handleClearCanvas = useCallback(() => {
@@ -525,25 +856,19 @@ export const CADCanvas: React.FC = () => {
     setHistoryState(createHistory([]));
   }, []);
 
-  // ── Google Drive project handlers ─────────────────────────────────────────
-
+  // ── Google Drive project handlers ──────────────────────────────────────────
   const handleNewProject = useCallback((_opts: NewProjectOptions) => {
-    // Clear canvas for new project
     setElements([]);
     setHistoryState(createHistory([]));
     setView({ offsetX: 0, offsetY: 0, zoom: 1 });
-    // If address is provided, could geocode and set basemap — left as future work
   }, []);
 
   const handleOpenProject = useCallback((project: NetrunCADProject) => {
-    // Restore elements and layers from the saved project
     if (project.elements) {
       setElements(project.elements);
       setHistoryState(createHistory(project.elements));
     }
-    // Restore view to origin
     setView({ offsetX: 0, offsetY: 0, zoom: 1 });
-    // Restore basemap state if present
     if (project.basemap) {
       setBasemap((prev) => ({
         ...prev,
@@ -556,20 +881,11 @@ export const CADCanvas: React.FC = () => {
     }
   }, []);
 
-  // DXF import handler — merges imported elements and any new layers
   const handleImport = useCallback(
     (imported: CADElement[], newLayers: import('../../engine/types').Layer[]) => {
-      // Add new layers (avoid duplicates by id)
       if (newLayers.length > 0) {
-        // useLayers doesn't expose setLayers directly, so we use addLayer for each new one
-        // We need to work around this by patching layers state via the existing hook.
-        // Since useLayers only exposes addLayer(name, color) we call it for truly new layers.
-        // (Built-in layers like 'site', 'planting' etc. are already present and won't duplicate.)
-        newLayers.forEach((l) => {
-          addLayer(l.name, l.color);
-        });
+        newLayers.forEach((l) => addLayer(l.name, l.color));
       }
-      // Merge elements
       setElements((prev) => {
         const next = [...prev, ...imported];
         setHistoryState((h) => pushState(h, next));
@@ -579,9 +895,13 @@ export const CADCanvas: React.FC = () => {
     [addLayer]
   );
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+  // Command line is visible in CAD mode (not in draw/color — pencil is primary)
+  const cmdVisible = true; // always show for keyboard accessibility
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-cad-bg">
-      {/* Canvas */}
+      {/* Canvas — leaves room at bottom for command line (72px) + status bar (28px) */}
       <canvas
         ref={canvasRef}
         className="absolute inset-0 cursor-crosshair"
@@ -590,6 +910,7 @@ export const CADCanvas: React.FC = () => {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onContextMenu={handleContextMenu}
       />
 
       {/* Mode Toolbar */}
@@ -649,7 +970,6 @@ export const CADCanvas: React.FC = () => {
 
       {/* Top center bar — Project management + Import/Export */}
       <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1">
-        {/* Project Bar (Drive save/open/share) */}
         <ProjectBar
           elements={elements}
           layers={layers}
@@ -658,7 +978,6 @@ export const CADCanvas: React.FC = () => {
           onNewProject={handleNewProject}
           onOpenProject={handleOpenProject}
         />
-        {/* Import / Export buttons */}
         <ImportExport
           elements={elements}
           layers={layers}
@@ -729,40 +1048,61 @@ export const CADCanvas: React.FC = () => {
         />
       )}
 
-      {/* Status bar */}
-      <div className="absolute bottom-0 left-0 right-0 bg-cad-surface/90 backdrop-blur-sm border-t border-cad-accent px-4 py-1 flex items-center justify-between text-xs text-cad-dim z-10">
-        <div className="flex items-center gap-4">
-          <span>Mode: <span className="text-cad-text font-medium uppercase">{mode}</span></span>
-          {mode === 'cad' && <span>Tool: <span className="text-cad-text font-medium">{cadTool}</span></span>}
-          <span>Layer: <span className="text-cad-text font-medium">{layers.find(l => l.id === getActiveLayer())?.name}</span></span>
-          <span>Grid: <span className={grid.enabled ? 'text-green-400' : 'text-red-400'}>{grid.enabled ? 'ON' : 'OFF'}</span></span>
-          <span>Snap: <span className={grid.snap ? 'text-green-400' : 'text-red-400'}>{grid.snap ? 'ON' : 'OFF'}</span></span>
+      {/* Ortho indicator */}
+      {orthoMode && (
+        <div
+          className="absolute top-2 left-1/2 ml-64 text-xs px-2 py-1 rounded"
+          style={{ background: '#1a3a1a', color: '#4ade80', border: '1px solid #4ade80' }}
+        >
+          ORTHO ON
         </div>
-        <div className="flex items-center gap-4">
-          <span>Zoom: {(view.zoom * 100).toFixed(0)}%</span>
-          <span>Elements: {elements.length}</span>
-          <button
-            onClick={handleClearCanvas}
-            className="text-red-400 hover:text-red-300 transition-colors"
-          >
-            Clear All
-          </button>
-          <button
-            onClick={resetView}
-            className="text-cad-text hover:text-white transition-colors"
-          >
-            Reset View
-          </button>
-        </div>
+      )}
+
+      {/* Keyboard shortcut hint — bottom left above command line */}
+      <div
+        className="absolute left-2 text-[10px] leading-relaxed z-10"
+        style={{ bottom: '108px', color: 'rgba(155,155,175,0.45)' }}
+      >
+        <div>Enter=command | Esc=cancel | 1-4=modes | V L R C D=tools</div>
+        <div>G=grid | S=snap | F7=grid | F8=ortho | Cmd+Z=undo</div>
       </div>
 
-      {/* Keyboard shortcuts overlay */}
-      <div className="absolute bottom-8 left-2 text-[10px] text-cad-dim/60 leading-relaxed">
-        <div>1-4: modes | V: select | L: line | R: rect | C: circle</div>
-        <div>G: grid | S: snap | Cmd+Z: undo | Cmd+Shift+Z: redo</div>
-        <div>Scroll: pan | Ctrl+Scroll: zoom | Backspace: delete last</div>
-        <div>Ctrl+S: save | Ctrl+O: open | Ctrl+N: new | Ctrl+Shift+S: save as</div>
-      </div>
+      {/* Context Menu */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={buildContextMenuItems()}
+          onAction={handleContextMenuAction}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Command Line — always rendered at bottom, above status bar */}
+      <CommandLine
+        prompt={cmdPrompt}
+        history={cmdHistory}
+        visible={cmdVisible}
+        focused={cmdFocused}
+        onFocusChange={setCmdFocused}
+        onExecute={handleCommandExecute}
+        onCancel={handleCommandCancel}
+      />
+
+      {/* Status Bar — very bottom strip */}
+      <StatusBar
+        mode={mode}
+        cadTool={cadTool}
+        grid={grid}
+        layers={layers}
+        activeLayerId={getActiveLayer()}
+        cursorX={cursorX}
+        cursorY={cursorY}
+        zoom={view.zoom}
+        elementCount={elements.length}
+        onClearAll={handleClearCanvas}
+        onResetView={resetView}
+      />
     </div>
   );
 };
