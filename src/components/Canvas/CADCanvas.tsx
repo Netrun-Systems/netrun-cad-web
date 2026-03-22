@@ -26,6 +26,7 @@ import { DrawToolbar } from '../Toolbar/DrawToolbar';
 import { ColorToolbar } from '../Toolbar/ColorToolbar';
 import { LayerPanel } from '../Toolbar/LayerPanel';
 import { PlantBrowser } from '../PlantPanel/PlantBrowser';
+import { ImportExport } from '../Toolbar/ImportExport';
 
 let plantPlaceId = 1;
 
@@ -480,6 +481,29 @@ export const CADCanvas: React.FC = () => {
     setHistoryState(createHistory([]));
   }, []);
 
+  // DXF import handler — merges imported elements and any new layers
+  const handleImport = useCallback(
+    (imported: CADElement[], newLayers: import('../../engine/types').Layer[]) => {
+      // Add new layers (avoid duplicates by id)
+      if (newLayers.length > 0) {
+        // useLayers doesn't expose setLayers directly, so we use addLayer for each new one
+        // We need to work around this by patching layers state via the existing hook.
+        // Since useLayers only exposes addLayer(name, color) we call it for truly new layers.
+        // (Built-in layers like 'site', 'planting' etc. are already present and won't duplicate.)
+        newLayers.forEach((l) => {
+          addLayer(l.name, l.color);
+        });
+      }
+      // Merge elements
+      setElements((prev) => {
+        const next = [...prev, ...imported];
+        setHistoryState((h) => pushState(h, next));
+        return next;
+      });
+    },
+    [addLayer]
+  );
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-cad-bg">
       {/* Canvas */}
@@ -547,6 +571,16 @@ export const CADCanvas: React.FC = () => {
           <span className="text-cad-dim text-xs">Click canvas to place text</span>
         </div>
       )}
+
+      {/* Import / Export buttons */}
+      <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20">
+        <ImportExport
+          elements={elements}
+          layers={layers}
+          grid={grid}
+          onImport={handleImport}
+        />
+      </div>
 
       {/* Layer Panel Toggle */}
       <button
