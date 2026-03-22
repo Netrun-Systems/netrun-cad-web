@@ -1,6 +1,6 @@
 /**
- * Import/Export toolbar — DXF import, DXF export, and PDF export.
- * Rendered as a row of buttons in the CAD toolbar area.
+ * Import/Export toolbar — DXF import/export, PDF export, GIS import, and 3D scan import.
+ * Rendered as an expandable panel in the CAD toolbar area.
  */
 
 import React, { useRef, useState, useCallback } from 'react';
@@ -9,6 +9,8 @@ import { importDXF } from '../../engine/dxf-import';
 import { exportDXF } from '../../engine/dxf-export';
 import { exportToPDF, SCALE_OPTIONS, PAGE_SIZES } from '../../engine/pdf-export';
 import type { TitleBlockInfo, PDFExportOptions } from '../../engine/pdf-export';
+import { GISImportModal } from './GISImportModal';
+import { ScanImportModal } from './ScanImportModal';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -17,6 +19,9 @@ interface ImportExportProps {
   layers: Layer[];
   grid: GridSettings;
   onImport: (elements: CADElement[], newLayers: Layer[]) => void;
+  /** Current basemap lat/lng center — used to pre-fill GIS origin */
+  basemapLat?: number;
+  basemapLng?: number;
 }
 
 // ── PDF Settings Modal ────────────────────────────────────────────────────────
@@ -79,7 +84,6 @@ const PDFModal: React.FC<PDFModalProps> = ({ elements, layers, grid, onClose }) 
       <div className="bg-cad-surface border border-cad-accent rounded-xl p-6 w-[480px] shadow-2xl">
         <h2 className="text-cad-text font-semibold text-lg mb-4">Export PDF</h2>
 
-        {/* Scale */}
         <div className="flex flex-col gap-1 mb-4">
           <label className="text-cad-dim text-xs">Scale</label>
           <select
@@ -93,7 +97,6 @@ const PDFModal: React.FC<PDFModalProps> = ({ elements, layers, grid, onClose }) 
           </select>
         </div>
 
-        {/* Page Size */}
         <div className="flex flex-col gap-1 mb-4">
           <label className="text-cad-dim text-xs">Page Size</label>
           <select
@@ -107,7 +110,6 @@ const PDFModal: React.FC<PDFModalProps> = ({ elements, layers, grid, onClose }) 
           </select>
         </div>
 
-        {/* Title Block */}
         <div className="border border-cad-accent rounded-lg p-3 mb-4">
           <p className="text-cad-dim text-xs mb-3 uppercase tracking-wide">Title Block</p>
           <div className="grid grid-cols-2 gap-3">
@@ -118,7 +120,6 @@ const PDFModal: React.FC<PDFModalProps> = ({ elements, layers, grid, onClose }) 
           </div>
         </div>
 
-        {/* Actions */}
         <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
@@ -153,7 +154,7 @@ const DXFImportModal: React.FC<DXFImportModalProps> = ({ file, onConfirm, onCanc
   const scaleForUnit = (u: string) => {
     if (u === 'inches') return 1 / 12;
     if (u === 'meters') return 3.28084;
-    return 1; // feet → feet
+    return 1;
   };
 
   return (
@@ -201,10 +202,14 @@ export const ImportExport: React.FC<ImportExportProps> = ({
   layers,
   grid,
   onImport,
+  basemapLat,
+  basemapLng,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [showPDFModal, setShowPDFModal] = useState(false);
+  const [showGISModal, setShowGISModal] = useState(false);
+  const [showScanModal, setShowScanModal] = useState(false);
   const [importing, setImporting] = useState(false);
 
   // ── DXF Import ──────────────────────────────────────────────────────────────
@@ -212,7 +217,6 @@ export const ImportExport: React.FC<ImportExportProps> = ({
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    // Reset input so the same file can be re-selected
     e.target.value = '';
     setPendingFile(file);
   }, []);
@@ -252,7 +256,7 @@ export const ImportExport: React.FC<ImportExportProps> = ({
 
   return (
     <>
-      {/* Hidden file input */}
+      {/* Hidden DXF file input */}
       <input
         ref={fileInputRef}
         type="file"
@@ -262,7 +266,8 @@ export const ImportExport: React.FC<ImportExportProps> = ({
       />
 
       {/* Button group */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 flex-wrap">
+        {/* DXF Import */}
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={importing}
@@ -275,6 +280,7 @@ export const ImportExport: React.FC<ImportExportProps> = ({
           {importing ? 'Importing...' : 'Import DXF'}
         </button>
 
+        {/* DXF Export */}
         <button
           onClick={handleExportDXF}
           disabled={elements.length === 0}
@@ -287,6 +293,7 @@ export const ImportExport: React.FC<ImportExportProps> = ({
           Export DXF
         </button>
 
+        {/* PDF Export */}
         <button
           onClick={() => setShowPDFModal(true)}
           disabled={elements.length === 0}
@@ -297,6 +304,33 @@ export const ImportExport: React.FC<ImportExportProps> = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
           </svg>
           Export PDF
+        </button>
+
+        {/* Separator */}
+        <div className="w-px h-5 bg-cad-accent/50 mx-0.5" />
+
+        {/* GIS Import */}
+        <button
+          onClick={() => setShowGISModal(true)}
+          title="Import GeoJSON or KML property data"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-cad-surface/90 border border-cad-accent text-cad-text rounded-lg text-xs hover:bg-cyan-700/30 hover:border-cyan-500 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+          </svg>
+          Import GIS
+        </button>
+
+        {/* 3D Scan Import */}
+        <button
+          onClick={() => setShowScanModal(true)}
+          title="Import 3D scan from KIRI Engine (OBJ or PLY)"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-cad-surface/90 border border-cad-accent text-cad-text rounded-lg text-xs hover:bg-orange-700/30 hover:border-orange-500 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+          </svg>
+          Import 3D Scan
         </button>
       </div>
 
@@ -316,6 +350,24 @@ export const ImportExport: React.FC<ImportExportProps> = ({
           layers={layers}
           grid={grid}
           onClose={() => setShowPDFModal(false)}
+        />
+      )}
+
+      {/* GIS import modal */}
+      {showGISModal && (
+        <GISImportModal
+          defaultLat={basemapLat}
+          defaultLng={basemapLng}
+          onImport={onImport}
+          onClose={() => setShowGISModal(false)}
+        />
+      )}
+
+      {/* 3D Scan import modal */}
+      {showScanModal && (
+        <ScanImportModal
+          onImport={onImport}
+          onClose={() => setShowScanModal(false)}
         />
       )}
     </>

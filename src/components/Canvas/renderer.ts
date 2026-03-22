@@ -269,16 +269,20 @@ export function renderAll(
   view: ViewState,
   grid: GridSettings,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  /** When true, skip the background fill (caller has already rendered a basemap) */
+  skipBackground = false
 ) {
   const dpr = window.devicePixelRatio || 1;
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-  // Fill background
-  ctx.fillStyle = '#12121f';
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  // Fill background (skip when basemap is rendered underneath)
+  if (!skipBackground) {
+    ctx.fillStyle = '#12121f';
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  }
 
   // Apply view transform
   ctx.translate(view.offsetX, view.offsetY);

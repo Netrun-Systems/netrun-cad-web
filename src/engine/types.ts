@@ -138,6 +138,8 @@ export interface DrawingState {
 }
 
 export const DEFAULT_LAYERS: Layer[] = [
+  { id: 'scan', name: 'Scan', visible: true, locked: false, opacity: 0.8, color: '#ff6e40', order: -2 },
+  { id: 'gis', name: 'GIS', visible: true, locked: false, opacity: 1, color: '#00e5ff', order: -1 },
   { id: 'site', name: 'Site', visible: true, locked: false, opacity: 1, color: '#888888', order: 0 },
   { id: 'hardscape', name: 'Hardscape', visible: true, locked: false, opacity: 1, color: '#a0826d', order: 1 },
   { id: 'planting', name: 'Planting', visible: true, locked: false, opacity: 1, color: '#4caf50', order: 2 },

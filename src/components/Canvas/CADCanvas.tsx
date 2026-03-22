@@ -27,6 +27,9 @@ import { ColorToolbar } from '../Toolbar/ColorToolbar';
 import { LayerPanel } from '../Toolbar/LayerPanel';
 import { PlantBrowser } from '../PlantPanel/PlantBrowser';
 import { ImportExport } from '../Toolbar/ImportExport';
+import { BasemapPanel } from '../Basemap/BasemapPanel';
+import type { BasemapState } from '../Basemap/BasemapRenderer';
+import { DEFAULT_BASEMAP, renderBasemap } from '../Basemap/BasemapRenderer';
 
 let plantPlaceId = 1;
 
@@ -78,6 +81,14 @@ export const CADCanvas: React.FC = () => {
 
   // Show layer panel
   const [showLayers, setShowLayers] = useState(false);
+
+  // Basemap state
+  const [basemap, setBasemap] = useState<BasemapState>(DEFAULT_BASEMAP);
+  const [showBasemapPanel, setShowBasemapPanel] = useState(false);
+
+  const handleBasemapChange = useCallback((updates: Partial<BasemapState>) => {
+    setBasemap((prev) => ({ ...prev, ...updates }));
+  }, []);
 
   // Get the active layer id based on mode
   const getActiveLayer = useCallback((): string => {
@@ -394,7 +405,37 @@ export const CADCanvas: React.FC = () => {
       // Combine committed elements + preview
       const allElements = preview ? [...elements, preview] : elements;
 
-      renderAll(ctx, allElements, layers, view, grid, width, height);
+      if (basemap.enabled) {
+        // Clear and fill dark background first, then draw tiles on top
+        const dprPre = window.devicePixelRatio || 1;
+        ctx.setTransform(dprPre, 0, 0, dprPre, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = '#12121f';
+        ctx.fillRect(0, 0, width, height);
+
+        // Draw satellite tiles
+        ctx.save();
+        ctx.translate(view.offsetX, view.offsetY);
+        ctx.scale(view.zoom, view.zoom);
+        renderBasemap(
+          ctx,
+          basemap,
+          view.offsetX,
+          view.offsetY,
+          view.zoom,
+          width,
+          height,
+          () => {
+            // Tile loaded — next animation frame will pick it up
+          }
+        );
+        ctx.restore();
+
+        // Render CAD elements without re-clearing (skipBackground=true)
+        renderAll(ctx, allElements, layers, view, grid, width, height, true);
+      } else {
+        renderAll(ctx, allElements, layers, view, grid, width, height, false);
+      }
 
       // Render live freehand stroke on top
       if (liveStrokePoints.length > 1) {
@@ -445,7 +486,7 @@ export const CADCanvas: React.FC = () => {
 
     animFrameRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animFrameRef.current);
-  }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId]);
+  }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap]);
 
   // Save to localStorage periodically
   useEffect(() => {
@@ -579,6 +620,8 @@ export const CADCanvas: React.FC = () => {
           layers={layers}
           grid={grid}
           onImport={handleImport}
+          basemapLat={basemap.centerLat}
+          basemapLng={basemap.centerLng}
         />
       </div>
 
@@ -609,6 +652,27 @@ export const CADCanvas: React.FC = () => {
       >
         Plants {selectedPlantId ? '(placing)' : ''}
       </button>
+
+      {/* Basemap Toggle */}
+      <button
+        onClick={() => setShowBasemapPanel(!showBasemapPanel)}
+        className={`absolute top-2 right-52 bg-cad-surface/90 backdrop-blur-sm border text-cad-text px-3 py-1.5 rounded-lg text-sm transition-colors z-20 ${
+          basemap.enabled
+            ? 'border-blue-500 text-blue-300 hover:bg-blue-700/30'
+            : 'border-cad-accent hover:bg-cad-accent/30'
+        }`}
+        title="Toggle satellite basemap"
+      >
+        {basemap.enabled ? 'Basemap ON' : 'Basemap'}
+      </button>
+
+      {showBasemapPanel && (
+        <BasemapPanel
+          basemap={basemap}
+          onChange={handleBasemapChange}
+          onClose={() => setShowBasemapPanel(false)}
+        />
+      )}
 
       {showPlantPanel && (
         <PlantBrowser

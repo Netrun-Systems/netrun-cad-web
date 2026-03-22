@@ -10,11 +10,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "dxf-parser": "^1.1.2",
+    "jspdf": "^2.5.1",
+    "perfect-freehand": "^1.2.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "perfect-freehand": "^1.2.2",
-    "jspdf": "^2.5.1",
-    "dxf-parser": "^1.1.2"
+    "shapefile": "^0.6.6"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",
