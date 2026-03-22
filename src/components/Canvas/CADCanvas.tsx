@@ -11,6 +11,7 @@ import type {
   FreehandStroke,
   TextElement,
   PlantPlacement,
+  InteriorSymbolPlacement,
 } from '../../engine/types';
 import { renderAll } from './renderer';
 import { usePointerEvents } from './usePointerEvents';
@@ -27,6 +28,7 @@ import { ColorToolbar } from '../Toolbar/ColorToolbar';
 import { LayerPanel } from '../Toolbar/LayerPanel';
 import { PlantBrowser } from '../PlantPanel/PlantBrowser';
 import { ImportExport } from '../Toolbar/ImportExport';
+import { SurvaiPanel } from '../SurvaiPanel/SurvaiPanel';
 import { BasemapPanel } from '../Basemap/BasemapPanel';
 import type { BasemapState } from '../Basemap/BasemapRenderer';
 import { DEFAULT_BASEMAP, renderBasemap } from '../Basemap/BasemapRenderer';
@@ -38,6 +40,17 @@ import { ContextMenu, type ContextMenuEntry } from '../ContextMenu/ContextMenu';
 import { StatusBar } from '../StatusBar/StatusBar';
 import { findCommand, getShortAlias } from '../../engine/commands';
 import { HelpPanel } from '../HelpPanel/HelpPanel';
+import { InteriorPanel } from '../InteriorPanel/InteriorPanel';
+import type { PlacingSymbol } from '../InteriorPanel/InteriorPanel';
+import { AlignmentEditor } from '../AlignmentEditor/AlignmentEditor';
+import type { AlignmentResult } from '../../engine/scan-gis-alignment';
+import {
+  autoAlignScanToGIS,
+  extractScanBoundaryPoints,
+  extractParcelBoundaryPoints,
+  applyAlignment,
+} from '../../engine/scan-gis-alignment';
+import type { InteriorSymbolDef } from '../../data/interior-symbols';
 
 let plantPlaceId = 1;
 
@@ -75,6 +88,19 @@ export const CADCanvas: React.FC = () => {
   // Plant placement
   const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null);
   const [showPlantPanel, setShowPlantPanel] = useState(false);
+
+  // Survai panel
+  const [showSurvaiPanel, setShowSurvaiPanel] = useState(false);
+
+  // Interior symbol placement
+  const [showInteriorPanel, setShowInteriorPanel] = useState(false);
+  const [placingInteriorSymbol, setPlacingInteriorSymbol] = useState<PlacingSymbol | null>(null);
+
+  // Scan-GIS alignment
+  const [showAlignmentEditor, setShowAlignmentEditor] = useState(false);
+  const [alignment, setAlignment] = useState<AlignmentResult | null>(null);
+  const [alignmentNotification, setAlignmentNotification] = useState<string | null>(null);
+
 
   // Layer & grid hooks
   const {
@@ -305,6 +331,7 @@ export const CADCanvas: React.FC = () => {
 
         // Landscape
         case 'panel:plants':    setShowPlantPanel((s) => !s); break;
+        case 'panel:survai':    setShowSurvaiPanel((s) => !s); break;
         case 'basemap:toggle':  setBasemap((b) => ({ ...b, enabled: !b.enabled })); break;
         case 'file:scan':       /* handled by ImportExport */ break;
         case 'file:gis':        /* handled by ImportExport */ break;
@@ -559,6 +586,26 @@ export const CADCanvas: React.FC = () => {
           plantId: selectedPlantId,
           layerId: 'planting',
           scale: 1,
+        };
+        addElement(placement);
+        cancelLongPress();
+        return;
+      }
+
+      // Interior symbol placement
+      if (placingInteriorSymbol && mode === 'cad') {
+        const point = getCanvasPoint(pe);
+        const sym = placingInteriorSymbol;
+        const placement: InteriorSymbolPlacement = {
+          type: 'interior-symbol',
+          id: `interior-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          position: { x: point.x, y: point.y },
+          symbolKey: sym.key,
+          width: sym.def.width,
+          depth: sym.def.depth,
+          layerId: 'interior',
+          rotation: sym.rotation,
+          color: '#8B7355',
         };
         addElement(placement);
         cancelLongPress();
@@ -896,6 +943,33 @@ export const CADCanvas: React.FC = () => {
       setElements((prev) => {
         const next = [...prev, ...imported];
         setHistoryState((h) => pushState(h, next));
+
+        // Auto-alignment: check if we now have both scan and GIS data
+        const hasScan = next.some((el) => el.layerId === 'scan');
+        const hasGIS = next.some((el) => el.layerId === 'gis');
+
+        if (hasScan && hasGIS) {
+          // Run alignment in next tick to avoid setState during render
+          setTimeout(() => {
+            const scanPts = extractScanBoundaryPoints(
+              next as Array<{ type: string; p1?: import('../../engine/types').Point; p2?: import('../../engine/types').Point; layerId: string }>
+            );
+            const parcelPts = extractParcelBoundaryPoints(
+              next as Array<{ type: string; p1?: import('../../engine/types').Point; p2?: import('../../engine/types').Point; layerId: string }>
+            );
+            if (scanPts.length > 0 && parcelPts.length > 0) {
+              const result = autoAlignScanToGIS(scanPts, parcelPts);
+              setAlignment(result);
+              const confPct = Math.round(result.confidence * 100);
+              setAlignmentNotification(
+                `Scan aligned to property (${confPct}% confidence). Click "Adjust" to fine-tune.`
+              );
+              // Clear notification after 6 seconds
+              setTimeout(() => setAlignmentNotification(null), 6000);
+            }
+          }, 0);
+        }
+
         return next;
       });
     },
@@ -1032,6 +1106,18 @@ export const CADCanvas: React.FC = () => {
         Plants {selectedPlantId ? '(placing)' : ''}
       </button>
 
+      {/* Interior Panel Toggle */}
+      <button
+        onClick={() => setShowInteriorPanel(!showInteriorPanel)}
+        className={`absolute top-2 right-48 bg-cad-surface/90 backdrop-blur-sm border text-cad-text px-3 py-1.5 rounded-lg text-sm transition-colors z-20 ${
+          placingInteriorSymbol
+            ? 'border-amber-500 text-amber-300 hover:bg-amber-700/30'
+            : 'border-cad-accent hover:bg-cad-accent/30'
+        }`}
+      >
+        Interior {placingInteriorSymbol ? '(placing)' : ''}
+      </button>
+
       {/* Basemap Toggle */}
       <button
         onClick={() => setShowBasemapPanel(!showBasemapPanel)}
@@ -1050,6 +1136,7 @@ export const CADCanvas: React.FC = () => {
           basemap={basemap}
           onChange={handleBasemapChange}
           onClose={() => setShowBasemapPanel(false)}
+          onParcelImport={handleImport}
         />
       )}
 
@@ -1061,6 +1148,70 @@ export const CADCanvas: React.FC = () => {
             setMode('cad');
           }}
           onClose={() => setShowPlantPanel(false)}
+        />
+      )}
+
+      {/* Survai cloud scan panel */}
+      {showSurvaiPanel && (
+        <SurvaiPanel
+          onImport={handleImport}
+          onClose={() => setShowSurvaiPanel(false)}
+        />
+      )}
+
+      {showInteriorPanel && (
+        <InteriorPanel
+          placingSymbol={placingInteriorSymbol}
+          onSelectSymbol={(sym) => {
+            setPlacingInteriorSymbol(sym);
+            if (sym) setMode('cad');
+          }}
+          onClose={() => setShowInteriorPanel(false)}
+        />
+      )}
+
+      {/* Scan-GIS alignment notification */}
+      {alignmentNotification && (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 z-40 bg-green-900/90 border border-green-500/50 rounded-lg px-4 py-2 text-green-300 text-xs flex items-center gap-3"
+          style={{ bottom: '120px' }}
+        >
+          <span>{alignmentNotification}</span>
+          {alignment && (
+            <button
+              onClick={() => setShowAlignmentEditor(true)}
+              className="px-2 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded text-xs font-medium transition-colors"
+            >
+              Adjust
+            </button>
+          )}
+          <button
+            onClick={() => setAlignmentNotification(null)}
+            className="text-green-400/60 hover:text-green-300 text-sm"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Scan-GIS alignment editor */}
+      {showAlignmentEditor && alignment && (
+        <AlignmentEditor
+          alignment={alignment}
+          canvasRef={canvasRef}
+          onChange={(updated) => setAlignment(updated)}
+          onAccept={(_final) => setShowAlignmentEditor(false)}
+          onReset={() => {
+            const scanPts = extractScanBoundaryPoints(
+              elements as Array<{ type: string; p1?: import('../../engine/types').Point; p2?: import('../../engine/types').Point; layerId: string }>
+            );
+            const parcelPts = extractParcelBoundaryPoints(
+              elements as Array<{ type: string; p1?: import('../../engine/types').Point; p2?: import('../../engine/types').Point; layerId: string }>
+            );
+            if (scanPts.length > 0 && parcelPts.length > 0) {
+              setAlignment(autoAlignScanToGIS(scanPts, parcelPts));
+            }
+          }}
         />
       )}
 

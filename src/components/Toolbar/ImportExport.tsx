@@ -11,6 +11,7 @@ import { exportToPDF, SCALE_OPTIONS, PAGE_SIZES } from '../../engine/pdf-export'
 import type { TitleBlockInfo, PDFExportOptions } from '../../engine/pdf-export';
 import { GISImportModal } from './GISImportModal';
 import { ScanImportModal } from './ScanImportModal';
+import { SurvaiPanel } from '../SurvaiPanel/SurvaiPanel';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -210,6 +211,7 @@ export const ImportExport: React.FC<ImportExportProps> = ({
   const [showPDFModal, setShowPDFModal] = useState(false);
   const [showGISModal, setShowGISModal] = useState(false);
   const [showScanModal, setShowScanModal] = useState(false);
+  const [showSurvaiPanel, setShowSurvaiPanel] = useState(false);
   const [importing, setImporting] = useState(false);
 
   // ── DXF Import ──────────────────────────────────────────────────────────────
@@ -321,7 +323,7 @@ export const ImportExport: React.FC<ImportExportProps> = ({
           Import GIS
         </button>
 
-        {/* 3D Scan Import */}
+        {/* 3D Scan Import (local file) */}
         <button
           onClick={() => setShowScanModal(true)}
           title="Import 3D scan from KIRI Engine (OBJ or PLY)"
@@ -331,6 +333,19 @@ export const ImportExport: React.FC<ImportExportProps> = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
           </svg>
           Import 3D Scan
+        </button>
+
+        {/* Survai — pull processed scans from cloud */}
+        <button
+          onClick={() => setShowSurvaiPanel(true)}
+          title="Import from Survai — pull processed site scans from the cloud"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-cad-surface/90 border border-cad-accent text-cad-text rounded-lg text-xs hover:bg-orange-700/30 hover:border-orange-500 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
+          </svg>
+          Survai
         </button>
       </div>
 
@@ -363,11 +378,19 @@ export const ImportExport: React.FC<ImportExportProps> = ({
         />
       )}
 
-      {/* 3D Scan import modal */}
+      {/* 3D Scan import modal (local file) */}
       {showScanModal && (
         <ScanImportModal
           onImport={onImport}
           onClose={() => setShowScanModal(false)}
+        />
+      )}
+
+      {/* Survai cloud scan panel */}
+      {showSurvaiPanel && (
+        <SurvaiPanel
+          onImport={onImport}
+          onClose={() => setShowSurvaiPanel(false)}
         />
       )}
     </>
