@@ -30,6 +30,9 @@ import { ImportExport } from '../Toolbar/ImportExport';
 import { BasemapPanel } from '../Basemap/BasemapPanel';
 import type { BasemapState } from '../Basemap/BasemapRenderer';
 import { DEFAULT_BASEMAP, renderBasemap } from '../Basemap/BasemapRenderer';
+import { ProjectBar } from '../ProjectManager/ProjectBar';
+import type { NetrunCADProject } from '../../services/google-drive';
+import type { NewProjectOptions } from '../ProjectManager/NewProjectDialog';
 
 let plantPlaceId = 1;
 
@@ -522,6 +525,37 @@ export const CADCanvas: React.FC = () => {
     setHistoryState(createHistory([]));
   }, []);
 
+  // ── Google Drive project handlers ─────────────────────────────────────────
+
+  const handleNewProject = useCallback((_opts: NewProjectOptions) => {
+    // Clear canvas for new project
+    setElements([]);
+    setHistoryState(createHistory([]));
+    setView({ offsetX: 0, offsetY: 0, zoom: 1 });
+    // If address is provided, could geocode and set basemap — left as future work
+  }, []);
+
+  const handleOpenProject = useCallback((project: NetrunCADProject) => {
+    // Restore elements and layers from the saved project
+    if (project.elements) {
+      setElements(project.elements);
+      setHistoryState(createHistory(project.elements));
+    }
+    // Restore view to origin
+    setView({ offsetX: 0, offsetY: 0, zoom: 1 });
+    // Restore basemap state if present
+    if (project.basemap) {
+      setBasemap((prev) => ({
+        ...prev,
+        enabled: project.basemap!.enabled,
+        centerLat: project.basemap!.lat,
+        centerLng: project.basemap!.lng,
+        tileZoom: project.basemap!.zoom,
+        provider: project.basemap!.provider as BasemapState['provider'],
+      }));
+    }
+  }, []);
+
   // DXF import handler — merges imported elements and any new layers
   const handleImport = useCallback(
     (imported: CADElement[], newLayers: import('../../engine/types').Layer[]) => {
@@ -613,8 +647,18 @@ export const CADCanvas: React.FC = () => {
         </div>
       )}
 
-      {/* Import / Export buttons */}
-      <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20">
+      {/* Top center bar — Project management + Import/Export */}
+      <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1">
+        {/* Project Bar (Drive save/open/share) */}
+        <ProjectBar
+          elements={elements}
+          layers={layers}
+          grid={grid}
+          basemap={basemap}
+          onNewProject={handleNewProject}
+          onOpenProject={handleOpenProject}
+        />
+        {/* Import / Export buttons */}
         <ImportExport
           elements={elements}
           layers={layers}
@@ -712,11 +756,12 @@ export const CADCanvas: React.FC = () => {
         </div>
       </div>
 
-      {/* Keyboard shortcuts overlay — toggle with ? */}
+      {/* Keyboard shortcuts overlay */}
       <div className="absolute bottom-8 left-2 text-[10px] text-cad-dim/60 leading-relaxed">
         <div>1-4: modes | V: select | L: line | R: rect | C: circle</div>
         <div>G: grid | S: snap | Cmd+Z: undo | Cmd+Shift+Z: redo</div>
         <div>Scroll: pan | Ctrl+Scroll: zoom | Backspace: delete last</div>
+        <div>Ctrl+S: save | Ctrl+O: open | Ctrl+N: new | Ctrl+Shift+S: save as</div>
       </div>
     </div>
   );
