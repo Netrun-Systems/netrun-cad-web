@@ -37,6 +37,7 @@ import { CommandLine } from '../CommandLine/CommandLine';
 import { ContextMenu, type ContextMenuEntry } from '../ContextMenu/ContextMenu';
 import { StatusBar } from '../StatusBar/StatusBar';
 import { findCommand, getShortAlias } from '../../engine/commands';
+import { HelpPanel } from '../HelpPanel/HelpPanel';
 
 let plantPlaceId = 1;
 
@@ -117,6 +118,9 @@ export const CADCanvas: React.FC = () => {
   // ── Cursor coordinates for status bar ──────────────────────────────────────
   const [cursorX, setCursorX] = useState(0);
   const [cursorY, setCursorY] = useState(0);
+
+  // ── Help panel ─────────────────────────────────────────────────────────────
+  const [showHelp, setShowHelp] = useState(false);
 
   const handleBasemapChange = useCallback((updates: Partial<BasemapState>) => {
     setBasemap((prev) => ({ ...prev, ...updates }));
@@ -306,12 +310,8 @@ export const CADCanvas: React.FC = () => {
         case 'file:gis':        /* handled by ImportExport */ break;
 
         case 'help':
-          setCmdHistory((h) => [
-            ...h,
-            'Commands: L=Line C=Circle R=Rect A=Arc D=Dim T=Text M=Move E=Erase',
-            'Z/ZI=ZoomIn ZO=ZoomOut ZA=ZoomAll G=Grid OS=Snap LA=Layers',
-            'SAVE SAVEAS OPEN PLOT PLANT BASEMAP SCAN GIS UNDO REDO',
-          ]);
+          setShowHelp(true);
+          setCmdHistory((h) => [...h, 'Help panel opened  — press Esc or ? to close']);
           break;
 
         default:
@@ -703,6 +703,13 @@ export const CADCanvas: React.FC = () => {
         return;
       }
 
+      // ── ? → toggle help panel ─────────────────────────────────────────────
+      if (e.key === '?') {
+        e.preventDefault();
+        setShowHelp((s) => !s);
+        return;
+      }
+
       // ── Space / any letter key → open command line and start typing ─────────
       // (AutoCAD behavior: typing a letter while idle opens the command line)
       if (
@@ -988,6 +995,15 @@ export const CADCanvas: React.FC = () => {
         />
       </div>
 
+      {/* Help button */}
+      <button
+        onClick={() => setShowHelp((s) => !s)}
+        title="Help & Reference (press ?)"
+        className="absolute top-2 right-20 bg-cad-surface/90 backdrop-blur-sm border border-cad-accent text-cad-text px-3 py-1.5 rounded-lg text-sm hover:bg-cad-accent/30 transition-colors z-20 font-bold"
+      >
+        ?
+      </button>
+
       {/* Layer Panel Toggle */}
       <button
         onClick={() => setShowLayers(!showLayers)}
@@ -1103,6 +1119,9 @@ export const CADCanvas: React.FC = () => {
         onClearAll={handleClearCanvas}
         onResetView={resetView}
       />
+
+      {/* Help Panel */}
+      <HelpPanel open={showHelp} onClose={() => setShowHelp(false)} />
     </div>
   );
 };
