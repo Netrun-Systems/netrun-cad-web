@@ -16,6 +16,11 @@ export interface GeocodingResult {
     west: number;
     east: number;
   };
+  /**
+   * Raw Nominatim address breakdown (county, state, city, etc.).
+   * Used by the parcel lookup service to route to the correct county ArcGIS server.
+   */
+  addressDetails: Record<string, string>;
 }
 
 const NOMINATIM_BASE = 'https://nominatim.openstreetmap.org/search';
@@ -59,5 +64,6 @@ export async function geocodeAddress(address: string): Promise<GeocodingResult |
       west: parseFloat(bb[2]),
       east: parseFloat(bb[3]),
     },
+    addressDetails: (result.address ?? {}) as Record<string, string>,
   };
 }

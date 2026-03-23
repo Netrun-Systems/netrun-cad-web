@@ -11,6 +11,9 @@ export interface StatusBarProps {
   cursorY: number;
   zoom: number;
   elementCount: number;
+  orthoMode?: boolean;
+  /** Context-aware prompt for the user (e.g. "Click to set first point") */
+  prompt?: string;
   onClearAll: () => void;
   onResetView: () => void;
 }
@@ -27,6 +30,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   elementCount,
   onClearAll,
   onResetView,
+  orthoMode,
+  prompt,
 }) => {
   const activeLayer = layers.find((l) => l.id === activeLayerId);
 
@@ -36,9 +41,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
   return (
     <div
-      className="absolute left-0 right-0 z-20 flex items-center justify-between px-4 py-1 text-xs"
+      className="flex items-center justify-between px-4 py-1 text-xs w-full"
       style={{
-        bottom: 0,
         background: 'rgba(26, 26, 46, 0.95)',
         borderTop: '1px solid #2a2a4a',
         fontFamily: "'Consolas', 'Courier New', monospace",
@@ -107,6 +111,26 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             {grid.snap ? 'ON' : 'OFF'}
           </span>
         </span>
+
+        <span style={{ color: '#555577' }}>|</span>
+
+        {/* Ortho status */}
+        <span style={{ color: '#9ca3af' }}>
+          ORTHO&nbsp;
+          <span style={{ color: orthoMode ? '#4ade80' : '#f87171' }}>
+            {orthoMode ? 'ON' : 'OFF'}
+          </span>
+        </span>
+
+        {/* Context-aware prompt */}
+        {prompt && (
+          <>
+            <span style={{ color: '#555577' }}>|</span>
+            <span style={{ color: '#ff9800', fontStyle: 'italic' }}>
+              {prompt}
+            </span>
+          </>
+        )}
       </div>
 
       {/* Right cluster — zoom + element count + actions */}

@@ -8,12 +8,15 @@ import type {
   FreehandStroke,
   TextElement,
   PlantPlacement,
+  InteriorSymbolPlacement,
   Layer,
   ViewState,
   GridSettings,
 } from '../../engine/types';
 import { distance, formatMeasurement, midpoint, angle } from '../../engine/geometry';
 import { PLANT_DATABASE } from '../../data/plants';
+import { INTERIOR_SYMBOLS } from '../../data/interior-symbols';
+import { renderInteriorSymbol } from '../../engine/interior-renderer';
 
 /** Render the grid onto a canvas context */
 export function renderGrid(
@@ -97,6 +100,18 @@ function drawFreehandPath(
 }
 
 function renderLine(ctx: CanvasRenderingContext2D, el: CADLine, grid: GridSettings) {
+  const meta = el.metadata;
+
+  ctx.save();
+
+  // Apply metadata overrides (neighbor parcels get dashed, low opacity)
+  if (meta?.opacity !== undefined) {
+    ctx.globalAlpha = meta.opacity;
+  }
+  if (meta?.dashPattern) {
+    ctx.setLineDash(meta.dashPattern);
+  }
+
   ctx.strokeStyle = el.strokeColor;
   ctx.lineWidth = el.strokeWidth;
   ctx.lineCap = 'round';
@@ -105,26 +120,31 @@ function renderLine(ctx: CanvasRenderingContext2D, el: CADLine, grid: GridSettin
   ctx.lineTo(el.p2.x, el.p2.y);
   ctx.stroke();
 
-  // Draw dimension label at midpoint
-  const dist = distance(el.p1, el.p2);
-  if (dist > 20) {
-    const mid = midpoint(el.p1, el.p2);
-    const ang = angle(el.p1, el.p2);
-    const label = formatMeasurement(dist, grid);
+  ctx.setLineDash([]);
+  ctx.restore();
 
-    ctx.save();
-    ctx.translate(mid.x, mid.y);
-    let textAngle = ang;
-    if (textAngle > Math.PI / 2 || textAngle < -Math.PI / 2) {
-      textAngle += Math.PI;
+  // Draw dimension label at midpoint (only for non-neighbor lines)
+  if (!meta?.isNeighbor) {
+    const dist = distance(el.p1, el.p2);
+    if (dist > 20) {
+      const mid = midpoint(el.p1, el.p2);
+      const ang = angle(el.p1, el.p2);
+      const label = formatMeasurement(dist, grid);
+
+      ctx.save();
+      ctx.translate(mid.x, mid.y);
+      let textAngle = ang;
+      if (textAngle > Math.PI / 2 || textAngle < -Math.PI / 2) {
+        textAngle += Math.PI;
+      }
+      ctx.rotate(textAngle);
+      ctx.fillStyle = '#88ccff';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(label, 0, -4);
+      ctx.restore();
     }
-    ctx.rotate(textAngle);
-    ctx.fillStyle = '#88ccff';
-    ctx.font = '11px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(label, 0, -4);
-    ctx.restore();
   }
 }
 
@@ -229,6 +249,31 @@ function renderText(ctx: CanvasRenderingContext2D, el: TextElement) {
   ctx.restore();
 }
 
+function renderInteriorSymbolEl(ctx: CanvasRenderingContext2D, el: InteriorSymbolPlacement) {
+  const def = INTERIOR_SYMBOLS[el.symbolKey];
+  if (!def) return;
+  ctx.save();
+  ctx.translate(el.position.x, el.position.y);
+  renderInteriorSymbol(
+    ctx,
+    def.shape,
+    el.width,
+    el.depth,
+    el.color ?? '#8B7355',
+    el.rotation
+  );
+  // Small label below the symbol
+  ctx.save();
+  ctx.fillStyle = '#8B7355';
+  ctx.font = '0.6px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.globalAlpha = 0.6;
+  ctx.fillText(def.label, 0, el.depth / 2 + 0.2);
+  ctx.restore();
+  ctx.restore();
+}
+
 function renderPlant(ctx: CanvasRenderingContext2D, el: PlantPlacement, grid: GridSettings) {
   const plant = PLANT_DATABASE.find((p) => p.id === el.plantId);
   if (!plant) return;
@@ -301,17 +346,32 @@ export function renderAll(
     return la - lb;
   });
 
+  // Collect neighbor APN label positions for post-pass rendering
+  const neighborLabels: Array<{ x: number; y: number; apn: string }> = [];
+
   // Render each element
   for (const el of sorted) {
     const layer = layerMap.get(el.layerId);
     if (!layer || !layer.visible) continue;
 
+    // Determine effective opacity: element metadata overrides layer opacity
+    const meta = (el as { metadata?: { opacity?: number; isNeighbor?: boolean; neighborApn?: string } }).metadata;
+    const effectiveOpacity = meta?.opacity !== undefined ? meta.opacity * layer.opacity : layer.opacity;
+
     ctx.save();
-    ctx.globalAlpha = layer.opacity;
+    ctx.globalAlpha = effectiveOpacity;
 
     switch (el.type) {
       case 'line':
         renderLine(ctx, el, grid);
+        // Collect first segment label position for neighbor APN display
+        if (meta?.isNeighbor && meta.neighborApn && el.type === 'line') {
+          neighborLabels.push({
+            x: (el.p1.x + el.p2.x) / 2,
+            y: (el.p1.y + el.p2.y) / 2,
+            apn: meta.neighborApn,
+          });
+        }
         break;
       case 'rectangle':
         renderRectangle(ctx, el);
@@ -331,8 +391,23 @@ export function renderAll(
       case 'plant':
         renderPlant(ctx, el, grid);
         break;
+      case 'interior-symbol':
+        renderInteriorSymbolEl(ctx, el as InteriorSymbolPlacement);
+        break;
     }
 
+    ctx.restore();
+  }
+
+  // Post-pass: render neighbor APN labels at 30% opacity, tiny text
+  for (const lbl of neighborLabels) {
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#aaaaaa';
+    ctx.font = '6px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(lbl.apn, lbl.x, lbl.y);
     ctx.restore();
   }
 }

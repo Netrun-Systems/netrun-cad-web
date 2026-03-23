@@ -18,14 +18,17 @@ import { usePointerEvents } from './usePointerEvents';
 import { useZoomPan } from './useZoomPan';
 import { useCADTools } from './useCADTools';
 import { useDrawingTools } from './useDrawingTools';
+import {
+  computeInferenceLines,
+  findSnapIndicator,
+  renderInferenceLines,
+  renderSnapIndicator,
+  renderCursorMeasurement,
+} from '../../engine/inference';
 import { useLayers } from './useLayers';
 import { useGrid } from './useGrid';
 import { createHistory, pushState, undo, redo } from '../../engine/history';
-import { ModeToolbar } from '../Toolbar/ModeToolbar';
-import { CADToolbar } from '../Toolbar/CADToolbar';
-import { DrawToolbar } from '../Toolbar/DrawToolbar';
-import { ColorToolbar } from '../Toolbar/ColorToolbar';
-import { LayerPanel } from '../Toolbar/LayerPanel';
+// Legacy component imports (panels still open as overlays)
 import { PlantBrowser } from '../PlantPanel/PlantBrowser';
 import { ImportExport } from '../Toolbar/ImportExport';
 import { SurvaiPanel } from '../SurvaiPanel/SurvaiPanel';
@@ -50,7 +53,13 @@ import {
   extractParcelBoundaryPoints,
   applyAlignment,
 } from '../../engine/scan-gis-alignment';
-import type { InteriorSymbolDef } from '../../data/interior-symbols';
+// New layout system
+import { TopBar, TOP_BAR_HEIGHT } from '../TopBar/TopBar';
+import { SidePanel, SIDE_PANEL_WIDTH_LANDSCAPE, SIDE_PANEL_WIDTH_PORTRAIT, SIDE_PANEL_WIDTH_COLLAPSED } from '../SidePanel/SidePanel';
+import { AppMenu } from '../Menu/AppMenu';
+import { useHandedness } from '../../hooks/useHandedness';
+import { useOrientation } from '../../hooks/useOrientation';
+import { SupportWidget } from '../SupportWidget/SupportWidget';
 
 let plantPlaceId = 1;
 
@@ -126,6 +135,18 @@ export const CADCanvas: React.FC = () => {
   // Ortho mode (F8 / ORTHO command)
   const [orthoMode, setOrthoMode] = useState(false);
 
+  // ── Intuitive CAD behavior state ───────────────────────────────────────────
+  /** Last drawing tool used (for Spacebar repeat) */
+  const [lastDrawTool, setLastDrawTool] = useState<CADTool>('line');
+  /** Timestamp of last Escape press (for two-stage escape) */
+  const lastEscRef = useRef<number>(0);
+  /** Inline text editing state */
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
+  const [editingTextValue, setEditingTextValue] = useState('');
+  const [editingTextPos, setEditingTextPos] = useState<{ x: number; y: number } | null>(null);
+  /** Track middle-mouse panning */
+  const middleMousePanRef = useRef(false);
+
   // ── Command line state ─────────────────────────────────────────────────────
   const [cmdFocused, setCmdFocused] = useState(false);
   const [cmdPrompt, setCmdPrompt] = useState('Command:');
@@ -147,6 +168,21 @@ export const CADCanvas: React.FC = () => {
 
   // ── Help panel ─────────────────────────────────────────────────────────────
   const [showHelp, setShowHelp] = useState(false);
+
+  // ── New layout state ────────────────────────────────────────────────────────
+  const [hand, setHand, toggleHand] = useHandedness();
+  const { orientation, isTouch } = useOrientation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
+  // Project name for top bar (syncs via ProjectBar ref pattern)
+  const [projectName, setProjectNameState] = useState('Untitled Project');
+  const [saveStatusLabel, setSaveStatusLabel] = useState('idle');
+
+  // Import/Export modal triggers (for hamburger menu)
+  const dxfFileInputRef = useRef<HTMLInputElement>(null);
+  const [showImportExportPDF, setShowImportExportPDF] = useState(false);
+  const [showGISModal, setShowGISModal] = useState(false);
+  const [showScanModal, setShowScanModal] = useState(false);
 
   const handleBasemapChange = useCallback((updates: Partial<BasemapState>) => {
     setBasemap((prev) => ({ ...prev, ...updates }));
@@ -205,10 +241,10 @@ export const CADCanvas: React.FC = () => {
       setLastAction(action);
       switch (action) {
         // Draw tools
-        case 'tool:line':        setMode('cad'); setCadTool('line');        break;
-        case 'tool:circle':      setMode('cad'); setCadTool('circle');      break;
-        case 'tool:rectangle':   setMode('cad'); setCadTool('rectangle');   break;
-        case 'tool:dimension':   setMode('cad'); setCadTool('dimension');   break;
+        case 'tool:line':        setMode('cad'); setCadTool('line');      setLastDrawTool('line');      break;
+        case 'tool:circle':      setMode('cad'); setCadTool('circle');    setLastDrawTool('circle');    break;
+        case 'tool:rectangle':   setMode('cad'); setCadTool('rectangle');setLastDrawTool('rectangle'); break;
+        case 'tool:dimension':   setMode('cad'); setCadTool('dimension');setLastDrawTool('dimension'); break;
         case 'tool:select':      setMode('cad'); setCadTool('select');      break;
         case 'tool:move':        setMode('cad'); setCadTool('move');        break;
 
@@ -348,31 +384,6 @@ export const CADCanvas: React.FC = () => {
     [doUndo, doRedo, doDelete, toggleGrid, toggleSnap]
   );
 
-  // ── Command line: handle user input ───────────────────────────────────────
-  const handleCommandExecute = useCallback(
-    (input: string) => {
-      const trimmed = input.trim().toLowerCase();
-      const cmd = findCommand(trimmed);
-
-      if (cmd) {
-        const shortAlias = getShortAlias(cmd.action);
-        setCmdHistory((h) => [
-          ...h,
-          `${shortAlias}  →  ${cmd.description}`,
-        ]);
-        setCmdPrompt('Command:');
-        executeCommand(cmd.action);
-      } else {
-        setCmdHistory((h) => [...h, `Unknown command: ${input.toUpperCase()}`]);
-      }
-    },
-    [executeCommand]
-  );
-
-  const handleCommandCancel = useCallback(() => {
-    setCmdPrompt('Command:');
-  }, []);
-
   // ── Context menu items ─────────────────────────────────────────────────────
   const buildContextMenuItems = useCallback((): ContextMenuEntry[] => {
     const hasElements = elements.length > 0;
@@ -444,15 +455,59 @@ export const CADCanvas: React.FC = () => {
   );
 
   // ── CAD tools ──────────────────────────────────────────────────────────────
-  const { handleCADDown, handleCADMove, handleCADUp } = useCADTools({
+  const { handleCADDown, handleCADMove, handleCADUp, pendingInput, handleNumericInput, cancelPending } = useCADTools({
     activeTool: cadTool,
     activeLayerId: getActiveLayer(),
     grid,
     strokeColor: cadStrokeColor,
     strokeWidth: cadStrokeWidth,
+    orthoMode,
     onElementCreated: addElement,
     onPreviewChange: setPreview,
   });
+
+  // ── Command line: handle user input ───────────────────────────────────────
+  const handleCommandExecute = useCallback(
+    (input: string) => {
+      const trimmed = input.trim().toLowerCase();
+      const cmd = findCommand(trimmed);
+
+      if (cmd) {
+        // If switching tools while one is pending, cancel the pending operation
+        if (pendingInput) {
+          cancelPending();
+        }
+        const shortAlias = getShortAlias(cmd.action);
+        setCmdHistory((h) => [
+          ...h,
+          `${shortAlias}  →  ${cmd.description}`,
+        ]);
+        setCmdPrompt('Command:');
+        executeCommand(cmd.action);
+      } else {
+        setCmdHistory((h) => [...h, `Unknown command: ${input.toUpperCase()}`]);
+      }
+    },
+    [executeCommand, pendingInput, cancelPending]
+  );
+
+  const handleCommandCancel = useCallback(() => {
+    cancelPending();
+    setCmdPrompt('Command:');
+  }, [cancelPending]);
+
+  // Numeric input handler passed to CommandLine
+  const handleNumericInputCmd = useCallback(
+    (input: string): boolean => {
+      const consumed = handleNumericInput(input);
+      if (consumed) {
+        setCmdHistory((h) => [...h, `  ${input}  →  Applied`]);
+        setCmdPrompt('Command:');
+      }
+      return consumed;
+    },
+    [handleNumericInput]
+  );
 
   // Drawing tools
   const { handleDrawStart, handleDrawMove, handleDrawEnd } = useDrawingTools({
@@ -536,11 +591,8 @@ export const CADCanvas: React.FC = () => {
       isPanningRef.current = false;
       endPan();
     } else if (mode === 'cad') {
-      const lastPoint = lastPointRef.current;
-      if (lastPoint) {
-        handleCADUp(lastPoint);
-        lastPointRef.current = null;
-      }
+      handleCADUp();
+      lastPointRef.current = null;
     } else if (mode === 'draw' || mode === 'color') {
       handleDrawEnd();
     }
@@ -562,6 +614,16 @@ export const CADCanvas: React.FC = () => {
       twoFingerRef.current.set(pe.pointerId, { x: pe.clientX, y: pe.clientY });
 
       if (twoFingerRef.current.size === 2) {
+        isPanningRef.current = true;
+        startPan(pe.clientX, pe.clientY);
+        cancelLongPress();
+        return;
+      }
+
+      // ── Middle mouse button → pan ────────────────────────────────────────
+      if (pe.button === 1) {
+        e.preventDefault();
+        middleMousePanRef.current = true;
         isPanningRef.current = true;
         startPan(pe.clientX, pe.clientY);
         cancelLongPress();
@@ -622,11 +684,28 @@ export const CADCanvas: React.FC = () => {
       const pe = e.nativeEvent;
       twoFingerRef.current.set(pe.pointerId, { x: pe.clientX, y: pe.clientY });
 
+      // Always update cursor coordinates for status bar
+      const cursorPt = getCanvasPoint(pe);
+      setCursorX(cursorPt.x);
+      setCursorY(cursorPt.y);
+
+      // When a CAD tool is awaiting a second click, show live preview
+      // even when pointer is not down (click-click flow, not drag flow)
+      if (pendingInput && mode === 'cad' && !isPanningRef.current) {
+        handleCADMove(cursorPt);
+      }
+
       // Cancel long-press if finger moved
       if (longPressStartRef.current) {
         const dx = pe.clientX - longPressStartRef.current.x;
         const dy = pe.clientY - longPressStartRef.current.y;
         if (Math.hypot(dx, dy) > 8) cancelLongPress();
+      }
+
+      // Middle-mouse drag panning
+      if (middleMousePanRef.current && isPanningRef.current) {
+        movePan(pe.clientX, pe.clientY);
+        return;
       }
 
       if (twoFingerRef.current.size === 2 && isPanningRef.current) {
@@ -636,7 +715,7 @@ export const CADCanvas: React.FC = () => {
 
       ptrMove(pe);
     },
-    [ptrMove, movePan, cancelLongPress]
+    [ptrMove, movePan, cancelLongPress, pendingInput, mode, handleCADMove, getCanvasPoint]
   );
 
   const handlePointerUp = useCallback(
@@ -645,7 +724,15 @@ export const CADCanvas: React.FC = () => {
       twoFingerRef.current.delete(pe.pointerId);
       cancelLongPress();
 
-      if (twoFingerRef.current.size < 2 && isPanningRef.current) {
+      // Middle mouse release
+      if (pe.button === 1 && middleMousePanRef.current) {
+        middleMousePanRef.current = false;
+        isPanningRef.current = false;
+        endPan();
+        return;
+      }
+
+      if (twoFingerRef.current.size < 2 && isPanningRef.current && !middleMousePanRef.current) {
         isPanningRef.current = false;
         endPan();
       }
@@ -663,6 +750,60 @@ export const CADCanvas: React.FC = () => {
     },
     []
   );
+
+  // ── Double-click handling ──────────────────────────────────────────────────
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      // Middle mouse double-click → zoom extents
+      if (e.button === 1) {
+        e.preventDefault();
+        resetView();
+        return;
+      }
+
+      // Left double-click in select mode → edit text element
+      if (mode === 'cad' && cadTool === 'select') {
+        const canvas = canvasRef.current!;
+        const rect = canvas.getBoundingClientRect();
+        const worldX = (e.clientX - rect.left - view.offsetX) / view.zoom;
+        const worldY = (e.clientY - rect.top - view.offsetY) / view.zoom;
+
+        // Hit-test text elements (reverse order for top-most)
+        for (let i = elements.length - 1; i >= 0; i--) {
+          const el = elements[i];
+          if (el.type === 'text') {
+            const dx = worldX - el.position.x;
+            const dy = worldY - el.position.y;
+            // Rough bounding box (text height ~fontSize, width estimated)
+            if (dx >= 0 && dx <= el.content.length * el.fontSize * 0.6 && dy >= 0 && dy <= el.fontSize * 1.2) {
+              setEditingTextId(el.id);
+              setEditingTextValue(el.content);
+              // Convert world position to screen position
+              const screenX = el.position.x * view.zoom + view.offsetX + rect.left;
+              const screenY = el.position.y * view.zoom + view.offsetY + rect.top;
+              setEditingTextPos({ x: screenX, y: screenY });
+              return;
+            }
+          }
+        }
+      }
+    },
+    [mode, cadTool, elements, view, resetView]
+  );
+
+  // Handle text edit commit
+  const commitTextEdit = useCallback(() => {
+    if (editingTextId && editingTextValue.trim()) {
+      setElements((prev) => prev.map((el) =>
+        el.id === editingTextId && el.type === 'text'
+          ? { ...el, content: editingTextValue }
+          : el
+      ));
+    }
+    setEditingTextId(null);
+    setEditingTextValue('');
+    setEditingTextPos(null);
+  }, [editingTextId, editingTextValue]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -696,10 +837,28 @@ export const CADCanvas: React.FC = () => {
         return;
       }
 
-      // ── Escape → cancel and unfocus ──────────────────────────────────────
+      // ── Escape → two-stage: first cancel operation, second switch to select ──
       if (e.key === 'Escape') {
-        setCmdFocused(false);
-        setCmdPrompt('Command:');
+        const now = Date.now();
+        const timeSinceLastEsc = now - lastEscRef.current;
+        lastEscRef.current = now;
+
+        if (pendingInput) {
+          // First Esc: cancel current operation but keep tool
+          cancelPending();
+          setCmdFocused(false);
+          setCmdPrompt('Command:');
+        } else if (timeSinceLastEsc < 500) {
+          // Second Esc within 500ms: switch to Select tool
+          setCadTool('select');
+          setMode('cad');
+          setCmdFocused(false);
+          setCmdPrompt('Command:');
+        } else {
+          // Single Esc with no operation: just unfocus
+          setCmdFocused(false);
+          setCmdPrompt('Command:');
+        }
         return;
       }
 
@@ -720,6 +879,15 @@ export const CADCanvas: React.FC = () => {
       if (e.key === 'F7') { e.preventDefault(); toggleGrid(); return; }
       if (e.key === 'F8') { e.preventDefault(); setOrthoMode((o) => !o); return; }
 
+      // ── Spacebar → repeat last drawing tool ────────────────────────────────
+      if (e.key === ' ' && !pendingInput) {
+        e.preventDefault();
+        setMode('cad');
+        setCadTool(lastDrawTool);
+        setCmdHistory((h) => [...h, `Repeat: ${lastDrawTool.toUpperCase()}`]);
+        return;
+      }
+
       // ── Mode shortcuts 1-4 ───────────────────────────────────────────────
       if (e.key === '1') { setMode('cad');   return; }
       if (e.key === '2') { setMode('draw');  return; }
@@ -729,10 +897,10 @@ export const CADCanvas: React.FC = () => {
       // ── CAD tool shortcuts (single keys, only in cad mode) ────────────────
       if (mode === 'cad') {
         if (e.key === 'v' || e.key === 'V') { setCadTool('select');    return; }
-        if (e.key === 'l' || e.key === 'L') { setCadTool('line');      return; }
-        if (e.key === 'r' || e.key === 'R') { setCadTool('rectangle'); return; }
-        if (e.key === 'c' || e.key === 'C') { setCadTool('circle');    return; }
-        if (e.key === 'd' || e.key === 'D') { setCadTool('dimension'); return; }
+        if (e.key === 'l' || e.key === 'L') { setCadTool('line');      setLastDrawTool('line');      return; }
+        if (e.key === 'r' || e.key === 'R') { setCadTool('rectangle'); setLastDrawTool('rectangle'); return; }
+        if (e.key === 'c' || e.key === 'C') { setCadTool('circle');    setLastDrawTool('circle');    return; }
+        if (e.key === 'd' || e.key === 'D') { setCadTool('dimension'); setLastDrawTool('dimension'); return; }
         if (e.key === 'g' || e.key === 'G') { toggleGrid(); return; }
         if (e.key === 's' && !e.metaKey && !e.ctrlKey) { toggleSnap(); return; }
       }
@@ -757,6 +925,21 @@ export const CADCanvas: React.FC = () => {
         return;
       }
 
+      // ── When a tool is awaiting numeric input, route digits to command line ──
+      if (
+        pendingInput &&
+        e.key.length === 1 &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        /^[0-9.,'"\-xX]$/.test(e.key)
+      ) {
+        e.preventDefault();
+        setCmdFocused(true);
+        window.dispatchEvent(new CustomEvent('cmdline:seed', { detail: e.key }));
+        return;
+      }
+
       // ── Space / any letter key → open command line and start typing ─────────
       // (AutoCAD behavior: typing a letter while idle opens the command line)
       if (
@@ -777,25 +960,38 @@ export const CADCanvas: React.FC = () => {
 
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand]);
+  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool]);
+
+  // ── Compute canvas dimensions based on layout ────────────────────────────
+  const sidePanelWidth = sidePanelCollapsed
+    ? SIDE_PANEL_WIDTH_COLLAPSED
+    : orientation === 'portrait'
+      ? SIDE_PANEL_WIDTH_PORTRAIT
+      : SIDE_PANEL_WIDTH_LANDSCAPE;
+
+  // Window dimensions for reactive canvas sizing
+  const [windowSize, setWindowSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+
+  useEffect(() => {
+    const handleResize = () => setWindowSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const canvasWidth = windowSize.w - sidePanelWidth;
+  const canvasHeight = windowSize.h - TOP_BAR_HEIGHT;
 
   // ── Canvas resize handler ──────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const resize = () => {
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = window.innerWidth * dpr;
-      canvas.height = window.innerHeight * dpr;
-      canvas.style.width = `${window.innerWidth}px`;
-      canvas.style.height = `${window.innerHeight}px`;
-    };
-
-    resize();
-    window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
-  }, []);
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvasWidth * dpr;
+    canvas.height = canvasHeight * dpr;
+    canvas.style.width = `${canvasWidth}px`;
+    canvas.style.height = `${canvasHeight}px`;
+  }, [canvasWidth, canvasHeight]);
 
   // ── Wheel handler ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -803,7 +999,17 @@ export const CADCanvas: React.FC = () => {
     if (!canvas) return;
 
     canvas.addEventListener('wheel', handleWheel, { passive: false });
-    return () => canvas.removeEventListener('wheel', handleWheel);
+
+    // Prevent middle-click auto-scroll
+    const preventMiddleClick = (e: MouseEvent) => {
+      if (e.button === 1) e.preventDefault();
+    };
+    canvas.addEventListener('mousedown', preventMiddleClick);
+
+    return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+      canvas.removeEventListener('mousedown', preventMiddleClick);
+    };
   }, [handleWheel]);
 
   // ── Render loop ────────────────────────────────────────────────────────────
@@ -877,12 +1083,63 @@ export const CADCanvas: React.FC = () => {
         ctx.restore();
       }
 
+      // ── CAD overlays: inference lines, snap indicators, cursor measurement ──
+      if (mode === 'cad' && pendingInput) {
+        const dprOverlay = window.devicePixelRatio || 1;
+        ctx.save();
+        ctx.setTransform(dprOverlay, 0, 0, dprOverlay, 0, 0);
+        ctx.translate(view.offsetX, view.offsetY);
+        ctx.scale(view.zoom, view.zoom);
+
+        const cursorPt = { x: cursorX, y: cursorY };
+        const startPt = pendingInput.startPoint;
+        const snapDist = grid.snapSize;
+
+        // 1. Inference lines
+        const inferenceLines = computeInferenceLines(
+          startPt,
+          cursorPt,
+          width / view.zoom,
+          height / view.zoom,
+          elements,
+          snapDist
+        );
+        if (inferenceLines.length > 0) {
+          renderInferenceLines(ctx, inferenceLines, cursorPt, view.zoom);
+        }
+
+        // 2. Dynamic length display at cursor
+        const toolType = cadTool as 'line' | 'rectangle' | 'circle';
+        if (toolType === 'line' || toolType === 'rectangle' || toolType === 'circle') {
+          renderCursorMeasurement(ctx, startPt, cursorPt, toolType, grid, view.zoom);
+        }
+
+        ctx.restore();
+      }
+
+      // ── Snap indicator (always active in CAD mode) ──────────────────────
+      if (mode === 'cad') {
+        const dprSnap = window.devicePixelRatio || 1;
+        ctx.save();
+        ctx.setTransform(dprSnap, 0, 0, dprSnap, 0, 0);
+        ctx.translate(view.offsetX, view.offsetY);
+        ctx.scale(view.zoom, view.zoom);
+
+        const cursorPt = { x: cursorX, y: cursorY };
+        const snapInd = findSnapIndicator(cursorPt, elements, grid.snapSize);
+        if (snapInd) {
+          renderSnapIndicator(ctx, snapInd, view.zoom);
+        }
+
+        ctx.restore();
+      }
+
       animFrameRef.current = requestAnimationFrame(render);
     };
 
     animFrameRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animFrameRef.current);
-  }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap]);
+  }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap, pendingInput, cadTool, cursorX, cursorY]);
 
   // ── localStorage persistence ───────────────────────────────────────────────
   useEffect(() => {
@@ -976,81 +1233,177 @@ export const CADCanvas: React.FC = () => {
     [addLayer]
   );
 
+  // ── Context-aware status bar prompt ─────────────────────────────────────
+  const statusPrompt = (() => {
+    if (mode !== 'cad') return undefined;
+    if (cadTool === 'select') return 'Select a tool to begin drawing (L=Line, R=Rectangle, C=Circle)';
+    if (!pendingInput) {
+      switch (cadTool) {
+        case 'line': return 'Click to set first point';
+        case 'rectangle': return 'Click to set first corner';
+        case 'circle': return 'Click to set center point';
+        case 'dimension': return 'Click first measurement point';
+        default: return undefined;
+      }
+    }
+    // Tool has pending input (first point set)
+    switch (cadTool) {
+      case 'line': return 'Click second point or type length and press Enter';
+      case 'rectangle': return 'Click opposite corner or type Width,Height';
+      case 'circle': return 'Click to set radius or type radius value';
+      case 'dimension':
+        if (pendingInput.phase === 1) return 'Click second measurement point';
+        if (pendingInput.phase === 2) return 'Move mouse to set offset distance, click to place';
+        return undefined;
+      default: return undefined;
+    }
+  })();
+
   // ── Render ─────────────────────────────────────────────────────────────────
   // Command line is visible in CAD mode (not in draw/color — pencil is primary)
   const cmdVisible = true; // always show for keyboard accessibility
 
+  // Canvas position offset based on side panel and handedness
+  const canvasLeftOffset = hand === 'left' ? sidePanelWidth : 0;
+
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-cad-bg">
-      {/* Canvas — leaves room at bottom for command line (72px) + status bar (28px) */}
+      {/* Top Bar */}
+      <TopBar
+        onOpenMenu={() => setMenuOpen(true)}
+        projectName={projectName}
+        saveStatus={saveStatusLabel}
+        basemapEnabled={basemap.enabled}
+        onToggleBasemap={() => setBasemap((b) => ({ ...b, enabled: !b.enabled }))}
+        onShowHelp={() => setShowHelp((s) => !s)}
+        hand={hand}
+        onToggleHand={toggleHand}
+      />
+
+      {/* Side Panel */}
+      <SidePanel
+        orientation={orientation}
+        hand={hand}
+        collapsed={sidePanelCollapsed}
+        onToggleCollapse={() => setSidePanelCollapsed((c) => !c)}
+        mode={mode}
+        setMode={setMode}
+        cadTool={cadTool}
+        setCadTool={setCadTool}
+        cadStrokeColor={cadStrokeColor}
+        setCadStrokeColor={setCadStrokeColor}
+        cadStrokeWidth={cadStrokeWidth}
+        setCadStrokeWidth={setCadStrokeWidth}
+        gridEnabled={grid.enabled}
+        snapEnabled={grid.snap}
+        toggleGrid={toggleGrid}
+        toggleSnap={toggleSnap}
+        drawBrush={drawBrush}
+        setDrawBrush={setDrawBrush}
+        penColor={penColor}
+        setPenColor={setPenColor}
+        penSize={penSize}
+        setPenSize={setPenSize}
+        penOpacity={penOpacity}
+        setPenOpacity={setPenOpacity}
+        colorBrush={colorBrush}
+        setColorBrush={setColorBrush}
+        colorColor={colorColor}
+        setColorColor={setColorColor}
+        colorSize={colorSize}
+        setColorSize={setColorSize}
+        colorOpacity={colorOpacity}
+        setColorOpacity={setColorOpacity}
+        textInput={textInput}
+        setTextInput={setTextInput}
+        layers={layers}
+        activeLayerId={activeLayerId}
+        onSelectLayer={setActiveLayerId}
+        onToggleVisibility={toggleLayerVisibility}
+        onToggleLock={toggleLayerLock}
+        onSetOpacity={setLayerOpacity}
+        onTogglePlants={() => setShowPlantPanel((s) => !s)}
+        onToggleInterior={() => setShowInteriorPanel((s) => !s)}
+        onToggleSurvai={() => setShowSurvaiPanel((s) => !s)}
+        showPlantPanel={showPlantPanel}
+        showInteriorPanel={showInteriorPanel}
+        showSurvaiPanel={showSurvaiPanel}
+        selectedPlantId={selectedPlantId}
+        placingInteriorSymbol={!!placingInteriorSymbol}
+      />
+
+      {/* Hamburger Menu */}
+      <AppMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        hand={hand}
+        onToggleHand={toggleHand}
+        onNewProject={() => {
+          handleNewProject({ name: 'Untitled Project', client: '', address: '', template: 'blank' });
+          setProjectNameState('Untitled Project');
+        }}
+        onOpenProject={() => {
+          // Trigger the ProjectBar's open picker via keyboard shortcut simulation
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, metaKey: true }));
+        }}
+        onSave={() => {
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, metaKey: true }));
+        }}
+        onSaveAs={() => {
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, metaKey: true, shiftKey: true }));
+        }}
+        onShare={() => { /* TODO: trigger share dialog */ }}
+        canShare={false}
+        signedIn={false}
+        onSignIn={() => { /* handled by ProjectBar */ }}
+        onSignOut={() => { /* handled by ProjectBar */ }}
+        onImportDXF={() => dxfFileInputRef.current?.click()}
+        onExportDXF={() => executeCommand('file:export')}
+        onExportPDF={() => setShowImportExportPDF(true)}
+        onImportGIS={() => setShowGISModal(true)}
+        onImport3DScan={() => setShowScanModal(true)}
+        onImportSurvai={() => setShowSurvaiPanel(true)}
+        elementsCount={elements.length}
+        basemapEnabled={basemap.enabled}
+        onToggleBasemap={() => setBasemap((b) => ({ ...b, enabled: !b.enabled }))}
+        onShowBasemapPanel={() => setShowBasemapPanel(true)}
+        gridEnabled={grid.enabled}
+        snapEnabled={grid.snap}
+        onToggleGrid={toggleGrid}
+        onToggleSnap={toggleSnap}
+        onResetView={resetView}
+        onZoomIn={() => setView((v) => ({ ...v, zoom: Math.min(v.zoom * 1.5, 32) }))}
+        onZoomOut={() => setView((v) => ({ ...v, zoom: Math.max(v.zoom / 1.5, 0.05) }))}
+        onShowHelp={() => setShowHelp(true)}
+        onClearAll={handleClearCanvas}
+      />
+
+      {/* Canvas — positioned to avoid overlapping with side panel and top bar */}
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 cursor-crosshair"
-        style={{ touchAction: 'none' }}
+        className="absolute"
+        style={{
+          touchAction: 'none',
+          top: `${TOP_BAR_HEIGHT}px`,
+          left: `${canvasLeftOffset}px`,
+          width: `${canvasWidth}px`,
+          height: `${canvasHeight}px`,
+          cursor: mode === 'cad'
+            ? (cadTool === 'select' || cadTool === 'move' ? 'grab' : 'crosshair')
+            : mode === 'draw' || mode === 'color'
+              ? 'default'
+              : 'text',
+        }}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onContextMenu={handleContextMenu}
+        onDoubleClick={handleDoubleClick}
       />
 
-      {/* Mode Toolbar */}
-      <ModeToolbar mode={mode} setMode={setMode} />
-
-      {/* Tool-specific toolbar */}
-      {mode === 'cad' && (
-        <CADToolbar
-          tool={cadTool}
-          setTool={setCadTool}
-          strokeColor={cadStrokeColor}
-          setStrokeColor={setCadStrokeColor}
-          strokeWidth={cadStrokeWidth}
-          setStrokeWidth={setCadStrokeWidth}
-          gridEnabled={grid.enabled}
-          snapEnabled={grid.snap}
-          toggleGrid={toggleGrid}
-          toggleSnap={toggleSnap}
-        />
-      )}
-      {mode === 'draw' && (
-        <DrawToolbar
-          brush={drawBrush}
-          setBrush={setDrawBrush}
-          color={penColor}
-          setColor={setPenColor}
-          size={penSize}
-          setSize={setPenSize}
-          opacity={penOpacity}
-          setOpacity={setPenOpacity}
-        />
-      )}
-      {mode === 'color' && (
-        <ColorToolbar
-          brush={colorBrush}
-          setBrush={setColorBrush}
-          color={colorColor}
-          setColor={setColorColor}
-          size={colorSize}
-          setSize={setColorSize}
-          opacity={colorOpacity}
-          setOpacity={setColorOpacity}
-        />
-      )}
-      {mode === 'text' && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-cad-surface/95 backdrop-blur-sm border border-cad-accent rounded-lg px-4 py-2 flex items-center gap-3">
-          <input
-            type="text"
-            value={textInput}
-            onChange={(e) => setTextInput(e.target.value)}
-            placeholder="Type text, then click canvas to place..."
-            className="bg-transparent text-cad-text border-b border-cad-accent outline-none px-2 py-1 w-64 text-sm"
-          />
-          <span className="text-cad-dim text-xs">Click canvas to place text</span>
-        </div>
-      )}
-
-      {/* Top center bar — Project management + Import/Export */}
-      <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1">
+      {/* Hidden ProjectBar (still handles Drive auth + save/open logic, rendered off-screen) */}
+      <div className="hidden">
         <ProjectBar
           elements={elements}
           layers={layers}
@@ -1059,6 +1412,10 @@ export const CADCanvas: React.FC = () => {
           onNewProject={handleNewProject}
           onOpenProject={handleOpenProject}
         />
+      </div>
+
+      {/* Hidden ImportExport (for modal rendering triggered from menu) */}
+      <div className="hidden">
         <ImportExport
           elements={elements}
           layers={layers}
@@ -1069,68 +1426,7 @@ export const CADCanvas: React.FC = () => {
         />
       </div>
 
-      {/* Help button */}
-      <button
-        onClick={() => setShowHelp((s) => !s)}
-        title="Help & Reference (press ?)"
-        className="absolute top-2 right-20 bg-cad-surface/90 backdrop-blur-sm border border-cad-accent text-cad-text px-3 py-1.5 rounded-lg text-sm hover:bg-cad-accent/30 transition-colors z-20 font-bold"
-      >
-        ?
-      </button>
-
-      {/* Layer Panel Toggle */}
-      <button
-        onClick={() => setShowLayers(!showLayers)}
-        className="absolute top-2 right-2 bg-cad-surface/90 backdrop-blur-sm border border-cad-accent text-cad-text px-3 py-1.5 rounded-lg text-sm hover:bg-cad-accent/30 transition-colors z-20"
-      >
-        Layers
-      </button>
-
-      {showLayers && (
-        <LayerPanel
-          layers={layers}
-          activeLayerId={activeLayerId}
-          onSelectLayer={setActiveLayerId}
-          onToggleVisibility={toggleLayerVisibility}
-          onToggleLock={toggleLayerLock}
-          onSetOpacity={setLayerOpacity}
-          onClose={() => setShowLayers(false)}
-        />
-      )}
-
-      {/* Plant Panel Toggle */}
-      <button
-        onClick={() => setShowPlantPanel(!showPlantPanel)}
-        className="absolute top-2 right-24 bg-cad-surface/90 backdrop-blur-sm border border-cad-accent text-cad-text px-3 py-1.5 rounded-lg text-sm hover:bg-cad-accent/30 transition-colors z-20"
-      >
-        Plants {selectedPlantId ? '(placing)' : ''}
-      </button>
-
-      {/* Interior Panel Toggle */}
-      <button
-        onClick={() => setShowInteriorPanel(!showInteriorPanel)}
-        className={`absolute top-2 right-48 bg-cad-surface/90 backdrop-blur-sm border text-cad-text px-3 py-1.5 rounded-lg text-sm transition-colors z-20 ${
-          placingInteriorSymbol
-            ? 'border-amber-500 text-amber-300 hover:bg-amber-700/30'
-            : 'border-cad-accent hover:bg-cad-accent/30'
-        }`}
-      >
-        Interior {placingInteriorSymbol ? '(placing)' : ''}
-      </button>
-
-      {/* Basemap Toggle */}
-      <button
-        onClick={() => setShowBasemapPanel(!showBasemapPanel)}
-        className={`absolute top-2 right-52 bg-cad-surface/90 backdrop-blur-sm border text-cad-text px-3 py-1.5 rounded-lg text-sm transition-colors z-20 ${
-          basemap.enabled
-            ? 'border-blue-500 text-blue-300 hover:bg-blue-700/30'
-            : 'border-cad-accent hover:bg-cad-accent/30'
-        }`}
-        title="Toggle satellite basemap"
-      >
-        {basemap.enabled ? 'Basemap ON' : 'Basemap'}
-      </button>
-
+      {/* Basemap Settings Panel */}
       {showBasemapPanel && (
         <BasemapPanel
           basemap={basemap}
@@ -1140,6 +1436,7 @@ export const CADCanvas: React.FC = () => {
         />
       )}
 
+      {/* Plant Browser Overlay */}
       {showPlantPanel && (
         <PlantBrowser
           selectedPlantId={selectedPlantId}
@@ -1159,6 +1456,7 @@ export const CADCanvas: React.FC = () => {
         />
       )}
 
+      {/* Interior Panel */}
       {showInteriorPanel && (
         <InteriorPanel
           placingSymbol={placingInteriorSymbol}
@@ -1218,8 +1516,14 @@ export const CADCanvas: React.FC = () => {
       {/* Ortho indicator */}
       {orthoMode && (
         <div
-          className="absolute top-2 left-1/2 ml-64 text-xs px-2 py-1 rounded"
-          style={{ background: '#1a3a1a', color: '#4ade80', border: '1px solid #4ade80' }}
+          className="absolute text-xs px-2 py-1 rounded z-20"
+          style={{
+            top: `${TOP_BAR_HEIGHT + 8}px`,
+            left: `${canvasLeftOffset + 8}px`,
+            background: '#1a3a1a',
+            color: '#4ade80',
+            border: '1px solid #4ade80',
+          }}
         >
           ORTHO ON
         </div>
@@ -1227,8 +1531,12 @@ export const CADCanvas: React.FC = () => {
 
       {/* Keyboard shortcut hint — bottom left above command line */}
       <div
-        className="absolute left-2 text-[10px] leading-relaxed z-10"
-        style={{ bottom: '108px', color: 'rgba(155,155,175,0.45)' }}
+        className="absolute text-[10px] leading-relaxed z-10"
+        style={{
+          bottom: '108px',
+          left: `${canvasLeftOffset + 8}px`,
+          color: 'rgba(155,155,175,0.45)',
+        }}
       >
         <div>Enter=command | Esc=cancel | 1-4=modes | V L R C D=tools</div>
         <div>G=grid | S=snap | F7=grid | F8=ortho | Cmd+Z=undo</div>
@@ -1245,34 +1553,92 @@ export const CADCanvas: React.FC = () => {
         />
       )}
 
-      {/* Command Line — always rendered at bottom, above status bar */}
-      <CommandLine
-        prompt={cmdPrompt}
-        history={cmdHistory}
-        visible={cmdVisible}
-        focused={cmdFocused}
-        onFocusChange={setCmdFocused}
-        onExecute={handleCommandExecute}
-        onCancel={handleCommandCancel}
-      />
+      {/* Command Line — bottom of canvas area */}
+      <div
+        className="absolute left-0 right-0 z-30"
+        style={{
+          bottom: 0,
+          marginLeft: `${canvasLeftOffset}px`,
+          marginRight: `${hand === 'right' ? sidePanelWidth : 0}px`,
+        }}
+      >
+        <CommandLine
+          prompt={cmdPrompt}
+          history={cmdHistory}
+          visible={cmdVisible}
+          focused={cmdFocused}
+          onFocusChange={setCmdFocused}
+          onExecute={handleCommandExecute}
+          onCancel={handleCommandCancel}
+          pendingInput={pendingInput}
+          onNumericInput={handleNumericInputCmd}
+          gridUnit={grid.unit}
+        />
+      </div>
 
-      {/* Status Bar — very bottom strip */}
-      <StatusBar
-        mode={mode}
-        cadTool={cadTool}
-        grid={grid}
-        layers={layers}
-        activeLayerId={getActiveLayer()}
-        cursorX={cursorX}
-        cursorY={cursorY}
-        zoom={view.zoom}
-        elementCount={elements.length}
-        onClearAll={handleClearCanvas}
-        onResetView={resetView}
-      />
+      {/* Status Bar — very bottom strip, spans canvas area only */}
+      <div
+        className="absolute z-20"
+        style={{
+          bottom: 0,
+          left: `${canvasLeftOffset}px`,
+          right: `${hand === 'right' ? sidePanelWidth : 0}px`,
+        }}
+      >
+        <StatusBar
+          mode={mode}
+          cadTool={cadTool}
+          grid={grid}
+          layers={layers}
+          activeLayerId={getActiveLayer()}
+          cursorX={cursorX}
+          cursorY={cursorY}
+          zoom={view.zoom}
+          elementCount={elements.length}
+          orthoMode={orthoMode}
+          prompt={statusPrompt}
+          onClearAll={handleClearCanvas}
+          onResetView={resetView}
+        />
+      </div>
+
+      {/* Inline text editor (double-click to edit) */}
+      {editingTextId && editingTextPos && (
+        <div
+          className="absolute z-50"
+          style={{
+            left: `${editingTextPos.x}px`,
+            top: `${editingTextPos.y}px`,
+          }}
+        >
+          <input
+            autoFocus
+            type="text"
+            value={editingTextValue}
+            onChange={(e) => setEditingTextValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                commitTextEdit();
+              } else if (e.key === 'Escape') {
+                setEditingTextId(null);
+                setEditingTextPos(null);
+              }
+            }}
+            onBlur={commitTextEdit}
+            className="bg-gray-900 border border-amber-500 text-white px-2 py-1 text-sm outline-none"
+            style={{
+              fontFamily: "'Consolas', 'Courier New', monospace",
+              minWidth: '120px',
+            }}
+          />
+        </div>
+      )}
 
       {/* Help Panel */}
       <HelpPanel open={showHelp} onClose={() => setShowHelp(false)} />
+
+      {/* Support Widget */}
+      <SupportWidget />
     </div>
   );
 };
