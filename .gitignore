@@ -4,3 +4,8 @@ dist/
 .env.local
 *.log
 .DS_Store
+
+# Environment files with secrets
+.env.production
+.env.local
+.env*.local
