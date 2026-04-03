@@ -562,7 +562,7 @@ const ImportExportTab: React.FC<{ search: string }> = () => (
 
     <SectionHeading>KIRI 3D Scan Import</SectionHeading>
     <Step n={1}>Scan the site with KIRI Engine on your iPhone. Export the scan as OBJ or PLY.</Step>
-    <Step n={2}>In Netrun CAD, click <strong className="text-gray-300">Import 3D Scan</strong> and select the file.</Step>
+    <Step n={2}>In Survai Construction, click <strong className="text-gray-300">Import 3D Scan</strong> and select the file.</Step>
     <Step n={3}>The scan is projected to a flat 2D plan view (top-down orthographic).</Step>
     <Step n={4}>A convex hull boundary is drawn automatically on the Scan layer.</Step>
     <Step n={5}>Elevation contour lines are generated from the point cloud height data.</Step>
@@ -572,7 +572,7 @@ const ImportExportTab: React.FC<{ search: string }> = () => (
     <Para>Click <strong className="text-gray-300">Drive</strong> in the ProjectBar. Sign in with your Google account.</Para>
     <div className="space-y-1 mb-4">
       {[
-        ['Save', 'Saves the current drawing as a .ncad file in your Drive (Netrun CAD folder)'],
+        ['Save', 'Saves the current drawing as a .ncad file in your Drive (Survai folder)'],
         ['Open', 'Browse and open any .ncad file from your Drive'],
         ['Share', 'Creates a view-only link to share with clients or contractors'],
         ['Auto-save', 'When signed in, saves automatically every 5 minutes'],
@@ -591,8 +591,8 @@ const ImportExportTab: React.FC<{ search: string }> = () => (
 const AboutTab: React.FC = () => (
   <div>
     <div className="text-center py-4 mb-4">
-      <div className="text-2xl font-bold text-white mb-1">Netrun CAD</div>
-      <div className="text-gray-500 text-xs">Web Edition</div>
+      <div className="text-2xl font-bold text-white mb-1">Survai Construction</div>
+      <div className="text-gray-500 text-xs">CAD + 3D Scan Integration</div>
     </div>
 
     <SectionHeading>Built By</SectionHeading>

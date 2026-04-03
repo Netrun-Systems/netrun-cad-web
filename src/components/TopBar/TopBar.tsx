@@ -33,6 +33,10 @@ interface TopBarProps {
   // Hand preference
   hand: Handedness;
   onToggleHand: () => void;
+
+  // 3D viewer toggle
+  show3D?: boolean;
+  onToggle3D?: () => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -46,6 +50,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onShowHelp,
   hand,
   onToggleHand,
+  show3D,
+  onToggle3D,
 }) => {
   return (
     <div
@@ -116,6 +122,22 @@ export const TopBar: React.FC<TopBarProps> = ({
             <path d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
           </svg>
         </button>
+
+        {/* 3D viewer toggle */}
+        {onToggle3D && (
+          <button
+            onClick={onToggle3D}
+            className={`min-w-[44px] min-h-[36px] flex items-center justify-center rounded-md text-xs font-bold transition-colors ${
+              show3D
+                ? 'text-emerald-300 bg-emerald-900/30 hover:bg-emerald-900/50'
+                : 'text-cad-dim hover:text-cad-text hover:bg-cad-accent/20'
+            }`}
+            title={show3D ? '3D View ON' : '3D View OFF'}
+            aria-label={`3D view ${show3D ? 'on' : 'off'}`}
+          >
+            3D
+          </button>
+        )}
 
         {/* Help */}
         <button

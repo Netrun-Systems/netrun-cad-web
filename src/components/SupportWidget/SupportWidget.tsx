@@ -40,7 +40,7 @@ var CFG={
   slug:"netrun-cad",
   primary:"#00d4aa",
   accent:"#ff9800",
-  title:"Netrun CAD Help",
+  title:"Survai Construction Help",
   greeting:"How can we help with your design?",
   tabs:["home","tutorials","shortcuts"]
 };

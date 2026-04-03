@@ -5,7 +5,7 @@
  * that were previously crowding the top bar.
  */
 
-import React, { useEffect, useCallback, useRef } from 'react';
+import React, { useEffect, useCallback, useRef, useState } from 'react';
 import type { Handedness } from '../../hooks/useHandedness';
 import type { CADElement, Layer, GridSettings } from '../../engine/types';
 import type { BasemapState } from '../Basemap/BasemapRenderer';
@@ -55,8 +55,34 @@ export interface AppMenuProps {
   // Help
   onShowHelp: () => void;
 
+  // Project files + history
+  onShowProjectFiles: () => void;
+  onShowRevisionHistory: () => void;
+
   // Clear
   onClearAll: () => void;
+
+  // PWA install
+  installPrompt: {
+    canInstall: boolean;
+    isInstalled: boolean;
+    promptInstall: () => Promise<'accepted' | 'dismissed' | 'manual'>;
+    isIOS: boolean;
+    isSafari: boolean;
+    needsManualInstall: boolean;
+  };
+
+  // UI panel visibility
+  topBarHidden: boolean;
+  onToggleTopBar: () => void;
+  statusBarHidden: boolean;
+  onToggleStatusBar: () => void;
+  cmdLineHidden: boolean;
+  onToggleCmdLine: () => void;
+  shortcutBarCollapsed: boolean;
+  onToggleShortcutBar: () => void;
+  sidePanelCollapsed: boolean;
+  onToggleSidePanel: () => void;
 }
 
 // ── Menu Section ──────────────────────────────────────────────────────────────
@@ -138,8 +164,22 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   onZoomIn,
   onZoomOut,
   onShowHelp,
+  onShowProjectFiles,
+  onShowRevisionHistory,
   onClearAll,
+  topBarHidden,
+  onToggleTopBar,
+  statusBarHidden,
+  onToggleStatusBar,
+  cmdLineHidden,
+  onToggleCmdLine,
+  shortcutBarCollapsed,
+  onToggleShortcutBar,
+  sidePanelCollapsed,
+  onToggleSidePanel,
+  installPrompt,
 }) => {
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
   // Close on Escape
   useEffect(() => {
     if (!open) return;
@@ -202,6 +242,8 @@ export const AppMenu: React.FC<AppMenuProps> = ({
             <MenuItem label="Save" icon="💾" shortcut="Ctrl+S" onClick={action(onSave)} />
             <MenuItem label="Save As..." icon="📋" shortcut="Ctrl+Shift+S" onClick={action(onSaveAs)} />
             <MenuItem label="Share" icon="🔗" onClick={action(onShare)} disabled={!canShare} />
+            <MenuItem label="Project Files & Notes" icon="📁" onClick={action(onShowProjectFiles)} disabled={!signedIn} />
+            <MenuItem label="Version History" icon="🕘" onClick={action(onShowRevisionHistory)} disabled={!signedIn} />
             <div className="h-px bg-cad-accent/30 my-1" />
             {!signedIn ? (
               <MenuItem label="Connect Google Drive" icon="☁️" onClick={action(onSignIn)} />
@@ -257,9 +299,65 @@ export const AppMenu: React.FC<AppMenuProps> = ({
             />
           </MenuSection>
 
+          <MenuSection title="Show / Hide Panels">
+            <MenuItem label={topBarHidden ? 'Show Top Bar' : 'Hide Top Bar'} icon="📏" onClick={action(onToggleTopBar)} active={!topBarHidden} />
+            <MenuItem label={shortcutBarCollapsed ? 'Show Shortcut Bar' : 'Hide Shortcut Bar'} icon="⌨" onClick={action(onToggleShortcutBar)} active={!shortcutBarCollapsed} />
+            <MenuItem label={sidePanelCollapsed ? 'Show Tool Panel' : 'Hide Tool Panel'} icon="🎛️" onClick={action(onToggleSidePanel)} active={!sidePanelCollapsed} />
+            <MenuItem label={statusBarHidden ? 'Show Status Bar' : 'Hide Status Bar'} icon="📊" onClick={action(onToggleStatusBar)} active={!statusBarHidden} />
+            <MenuItem label={cmdLineHidden ? 'Show Command Line' : 'Hide Command Line'} icon="⌨️" onClick={action(onToggleCmdLine)} active={!cmdLineHidden} />
+          </MenuSection>
+
           <MenuSection title="Help">
             <MenuItem label="Help & Reference" icon="❓" shortcut="?" onClick={action(onShowHelp)} />
           </MenuSection>
+
+          {/* Install to home screen */}
+          {!installPrompt.isInstalled && (
+            <MenuSection title="Install App">
+              {installPrompt.canInstall ? (
+                <MenuItem
+                  label="Add to Home Screen"
+                  icon="📲"
+                  onClick={() => {
+                    installPrompt.promptInstall();
+                    onClose();
+                  }}
+                />
+              ) : (
+                <>
+                  <MenuItem
+                    label="Save to Home Screen"
+                    icon="📲"
+                    onClick={() => setShowInstallHelp(!showInstallHelp)}
+                  />
+                  {showInstallHelp && (
+                    <div className="px-3 py-3 bg-cad-accent/10 rounded-lg mx-1 mt-1 space-y-2">
+                      {installPrompt.isIOS ? (
+                        <>
+                          <p className="text-cad-text text-xs font-medium">On iPad / iPhone:</p>
+                          <ol className="text-cad-dim text-xs space-y-1.5 list-decimal list-inside">
+                            <li>Tap the <strong className="text-cad-text">Share</strong> button <span className="inline-block w-4 h-4 text-center border border-cad-accent rounded text-[10px] leading-4">↑</span> in Safari's toolbar</li>
+                            <li>Scroll down and tap <strong className="text-cad-text">"Add to Home Screen"</strong></li>
+                            <li>Tap <strong className="text-cad-text">"Add"</strong> in the top-right corner</li>
+                          </ol>
+                          <p className="text-cad-dim text-[10px] mt-2">The app will launch full-screen without browser bars, just like a native app.</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-cad-text text-xs font-medium">In your browser:</p>
+                          <ol className="text-cad-dim text-xs space-y-1.5 list-decimal list-inside">
+                            <li>Tap the <strong className="text-cad-text">menu</strong> (three dots) in your browser</li>
+                            <li>Tap <strong className="text-cad-text">"Add to Home Screen"</strong> or <strong className="text-cad-text">"Install App"</strong></li>
+                            <li>Confirm by tapping <strong className="text-cad-text">"Install"</strong></li>
+                          </ol>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </MenuSection>
+          )}
 
           <div className="h-px bg-cad-accent/30 my-2" />
 
@@ -274,7 +372,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
 
         {/* Footer */}
         <div className="px-4 py-3 text-center text-[10px] text-cad-dim/50 border-t border-cad-accent/30 shrink-0">
-          Netrun CAD Web Edition
+          Survai Construction
         </div>
       </div>
     </>

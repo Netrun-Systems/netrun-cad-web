@@ -4,6 +4,7 @@ import type {
   AppMode,
   CADTool,
   CADElement,
+  Point,
   StrokePoint,
   ViewState,
   DrawBrush,
@@ -36,12 +37,14 @@ import { BasemapPanel } from '../Basemap/BasemapPanel';
 import type { BasemapState } from '../Basemap/BasemapRenderer';
 import { DEFAULT_BASEMAP, renderBasemap } from '../Basemap/BasemapRenderer';
 import { ProjectBar } from '../ProjectManager/ProjectBar';
+import type { ProjectBarHandle } from '../ProjectManager/ProjectBar';
 import type { NetrunCADProject } from '../../services/google-drive';
 import type { NewProjectOptions } from '../ProjectManager/NewProjectDialog';
 import { CommandLine } from '../CommandLine/CommandLine';
 import { ContextMenu, type ContextMenuEntry } from '../ContextMenu/ContextMenu';
 import { StatusBar } from '../StatusBar/StatusBar';
 import { findCommand, getShortAlias } from '../../engine/commands';
+import { findElementAt, moveElement, getBoundingBox } from '../../engine/selection';
 import { HelpPanel } from '../HelpPanel/HelpPanel';
 import { InteriorPanel } from '../InteriorPanel/InteriorPanel';
 import type { PlacingSymbol } from '../InteriorPanel/InteriorPanel';
@@ -60,6 +63,14 @@ import { AppMenu } from '../Menu/AppMenu';
 import { useHandedness } from '../../hooks/useHandedness';
 import { useOrientation } from '../../hooks/useOrientation';
 import { SupportWidget } from '../SupportWidget/SupportWidget';
+import { ShortcutBar } from '../ShortcutBar/ShortcutBar';
+import { useInstallPrompt } from '../../hooks/useInstallPrompt';
+import { ProjectFilesPanel } from '../ProjectManager/ProjectFilesPanel';
+import { RevisionHistoryPanel } from '../ProjectManager/RevisionHistoryPanel';
+import type { Detection3D } from '../Viewport3D/ModelViewer3D';
+import SplitView from '../SplitView/SplitView';
+import ModelViewer3D from '../Viewport3D/ModelViewer3D';
+import BlueprintPanel from '../BlueprintPanel/BlueprintPanel';
 
 let plantPlaceId = 1;
 
@@ -105,11 +116,23 @@ export const CADCanvas: React.FC = () => {
   const [showInteriorPanel, setShowInteriorPanel] = useState(false);
   const [placingInteriorSymbol, setPlacingInteriorSymbol] = useState<PlacingSymbol | null>(null);
 
+  // Element selection (select tool)
+  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const dragStartRef = useRef<Point | null>(null);
+  const dragElementStartRef = useRef<Point | null>(null);
+
   // Scan-GIS alignment
   const [showAlignmentEditor, setShowAlignmentEditor] = useState(false);
   const [alignment, setAlignment] = useState<AlignmentResult | null>(null);
   const [alignmentNotification, setAlignmentNotification] = useState<string | null>(null);
 
+  // Blueprint / 3D / split view state
+  const [show3DView, setShow3DView] = useState(false);
+  const [splitMode, setSplitMode] = useState<'cad-only' | 'split' | '3d-only'>('cad-only');
+  const [scan3DDetections, setScan3DDetections] = useState<Detection3D[]>([]);
+  const [activeScanId, setActiveScanId] = useState<string | null>(null);
+  const [showBlueprintPanel, setShowBlueprintPanel] = useState(false);
+  const [activeBlueprintId, setActiveBlueprintId] = useState<string | null>(null);
 
   // Layer & grid hooks
   const {
@@ -151,7 +174,7 @@ export const CADCanvas: React.FC = () => {
   const [cmdFocused, setCmdFocused] = useState(false);
   const [cmdPrompt, setCmdPrompt] = useState('Command:');
   const [cmdHistory, setCmdHistory] = useState<string[]>([
-    'Welcome to Netrun CAD  |  Type a command or alias and press Enter',
+    'Welcome to Survai Construction  |  Type a command or alias and press Enter',
     'Press Enter or click here to focus the command line',
     'Esc cancels  |  Tab completes  |  ? for help',
   ]);
@@ -172,11 +195,39 @@ export const CADCanvas: React.FC = () => {
   // ── New layout state ────────────────────────────────────────────────────────
   const [hand, setHand, toggleHand] = useHandedness();
   const { orientation, isTouch } = useOrientation();
+  const installPrompt = useInstallPrompt();
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
   // Project name for top bar (syncs via ProjectBar ref pattern)
   const [projectName, setProjectNameState] = useState('Untitled Project');
   const [saveStatusLabel, setSaveStatusLabel] = useState('idle');
+
+  // ProjectBar ref for Drive state access
+  const projectBarRef = useRef<ProjectBarHandle>(null);
+
+  // Project files panel
+  const [showProjectFiles, setShowProjectFiles] = useState(false);
+  const [showRevisionHistory, setShowRevisionHistory] = useState(false);
+  const [clientName, setClientName] = useState('');
+
+  // UI visibility states (all panels hideable/collapsible)
+  const [shortcutBarCollapsed, setShortcutBarCollapsed] = useState(false);
+  const [topBarHidden, setTopBarHidden] = useState(false);
+  const [statusBarHidden, setStatusBarHidden] = useState(false);
+  const [cmdLineHidden, setCmdLineHidden] = useState(false);
+
+  // Sync save status from ProjectBar to TopBar display
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const pb = projectBarRef.current;
+      if (pb) {
+        setSaveStatusLabel(pb.saveStatus);
+        if (pb.projectName !== projectName) setProjectNameState(pb.projectName);
+        if (pb.clientName !== clientName) setClientName(pb.clientName);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, [projectName]);
 
   // Import/Export modal triggers (for hamburger menu)
   const dxfFileInputRef = useRef<HTMLInputElement>(null);
@@ -208,6 +259,21 @@ export const CADCanvas: React.FC = () => {
     [elements]
   );
 
+  // Blueprint / 3D handlers
+  const handleBlueprintImported = useCallback((newElements: CADElement[], blueprintId: string) => {
+    setElements(prev => [...prev, ...newElements]);
+    setActiveBlueprintId(blueprintId);
+  }, []);
+
+  const handleDeviationsComputed = useCallback((devElements: CADElement[]) => {
+    setElements(prev => [...prev.filter(e => e.layerId !== 'deviations'), ...devElements]);
+  }, []);
+
+  const handleScan3DData = useCallback((scanId: string, detections: Detection3D[]) => {
+    setActiveScanId(scanId);
+    setScan3DDetections(detections);
+  }, []);
+
   // Undo helper
   const doUndo = useCallback(() => {
     setHistoryState((h) => {
@@ -229,11 +295,19 @@ export const CADCanvas: React.FC = () => {
   // Delete last element
   const doDelete = useCallback(() => {
     setElements((prev) => {
-      const next = prev.slice(0, -1);
+      let next: typeof prev;
+      if (selectedElementId) {
+        // Delete the selected element
+        next = prev.filter((el) => el.id !== selectedElementId);
+        setSelectedElementId(null);
+      } else {
+        // No selection — delete the last element (legacy behavior)
+        next = prev.slice(0, -1);
+      }
       setHistoryState((h) => pushState(h, next));
       return next;
     });
-  }, []);
+  }, [selectedElementId]);
 
   // ── executeCommand — maps action IDs to real state changes ────────────────
   const executeCommand = useCallback(
@@ -364,6 +438,26 @@ export const CADCanvas: React.FC = () => {
           setElements([]);
           setHistoryState(createHistory([]));
           break;
+
+        // ShortcutBar aliases (map to existing actions)
+        case 'edit:undo':       doUndo();  break;
+        case 'edit:redo':       doRedo();  break;
+        case 'view:grid':       toggleGrid(); break;
+        case 'view:snap':       toggleSnap(); break;
+        case 'view:fit':        setView({ offsetX: 0, offsetY: 0, zoom: 1 }); break;
+        case 'mode:cad':        setMode('cad'); break;
+        case 'file:export-pdf': setShowImportExportPDF(true); break;
+        case 'escape':
+          setSelectedElementId(null);
+          cancelPending?.();
+          setCmdFocused(false);
+          setCmdPrompt('Command:');
+          break;
+        case 'panel:help':      setShowHelp((s) => !s); break;
+        case 'panel:interior':  setShowInteriorPanel((s) => !s); break;
+        case 'panel:survai':    setShowSurvaiPanel((s) => !s); break;
+        case 'panel:files':     setShowProjectFiles((s) => !s); break;
+        case 'panel:history':   setShowRevisionHistory((s) => !s); break;
 
         // Landscape
         case 'panel:plants':    setShowPlantPanel((s) => !s); break;
@@ -535,7 +629,24 @@ export const CADCanvas: React.FC = () => {
   const onStrokeStart = useCallback(
     (point: StrokePoint) => {
       if (mode === 'cad') {
-        if (cadTool === 'select' || cadTool === 'move') {
+        if (cadTool === 'select') {
+          // Hit test for element selection
+          const hit = findElementAt(elements, point, view.zoom);
+          if (hit) {
+            setSelectedElementId(hit.id);
+            dragStartRef.current = { x: point.x, y: point.y };
+            // Store the element's initial position for smooth dragging
+            const bb = getBoundingBox(hit);
+            dragElementStartRef.current = { x: bb.x, y: bb.y };
+          } else {
+            setSelectedElementId(null);
+            // No element hit — pan instead
+            isPanningRef.current = true;
+            const canvas = canvasRef.current!;
+            const rect = canvas.getBoundingClientRect();
+            startPan(point.x * view.zoom + view.offsetX + rect.left, point.y * view.zoom + view.offsetY + rect.top);
+          }
+        } else if (cadTool === 'move') {
           isPanningRef.current = true;
           const canvas = canvasRef.current!;
           const rect = canvas.getBoundingClientRect();
@@ -573,7 +684,19 @@ export const CADCanvas: React.FC = () => {
       setCursorX(point.x);
       setCursorY(point.y);
 
-      if (isPanningRef.current) {
+      if (selectedElementId && dragStartRef.current && cadTool === 'select') {
+        // Drag the selected element
+        const dx = point.x - dragStartRef.current.x;
+        const dy = point.y - dragStartRef.current.y;
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+          setElements((prev) =>
+            prev.map((el) =>
+              el.id === selectedElementId ? moveElement(el, dx, dy) : el
+            )
+          );
+          dragStartRef.current = { x: point.x, y: point.y };
+        }
+      } else if (isPanningRef.current) {
         const canvas = canvasRef.current!;
         const rect = canvas.getBoundingClientRect();
         movePan(point.x * view.zoom + view.offsetX + rect.left, point.y * view.zoom + view.offsetY + rect.top);
@@ -587,6 +710,8 @@ export const CADCanvas: React.FC = () => {
   );
 
   const onStrokeEnd = useCallback(() => {
+    dragStartRef.current = null;
+    dragElementStartRef.current = null;
     if (isPanningRef.current) {
       isPanningRef.current = false;
       endPan();
@@ -855,7 +980,8 @@ export const CADCanvas: React.FC = () => {
           setCmdFocused(false);
           setCmdPrompt('Command:');
         } else {
-          // Single Esc with no operation: just unfocus
+          // Single Esc with no operation: deselect element + unfocus
+          setSelectedElementId(null);
           setCmdFocused(false);
           setCmdPrompt('Command:');
         }
@@ -1131,6 +1257,31 @@ export const CADCanvas: React.FC = () => {
           renderSnapIndicator(ctx, snapInd, view.zoom);
         }
 
+        // Draw selection highlight
+        if (selectedElementId) {
+          const selEl = elements.find((e) => e.id === selectedElementId);
+          if (selEl) {
+            const bb = getBoundingBox(selEl);
+            const pad = 4 / view.zoom;
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2 / view.zoom;
+            ctx.setLineDash([6 / view.zoom, 4 / view.zoom]);
+            ctx.strokeRect(bb.x - pad, bb.y - pad, bb.width + pad * 2, bb.height + pad * 2);
+            ctx.setLineDash([]);
+            // Corner handles
+            const hs = 4 / view.zoom;
+            ctx.fillStyle = '#3b82f6';
+            for (const [hx, hy] of [
+              [bb.x - pad, bb.y - pad],
+              [bb.x + bb.width + pad, bb.y - pad],
+              [bb.x - pad, bb.y + bb.height + pad],
+              [bb.x + bb.width + pad, bb.y + bb.height + pad],
+            ]) {
+              ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2);
+            }
+          }
+        }
+
         ctx.restore();
       }
 
@@ -1139,7 +1290,7 @@ export const CADCanvas: React.FC = () => {
 
     animFrameRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animFrameRef.current);
-  }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap, pendingInput, cadTool, cursorX, cursorY]);
+  }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap, pendingInput, cadTool, cursorX, cursorY, selectedElementId]);
 
   // ── localStorage persistence ───────────────────────────────────────────────
   useEffect(() => {
@@ -1268,16 +1419,38 @@ export const CADCanvas: React.FC = () => {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-cad-bg">
-      {/* Top Bar */}
-      <TopBar
-        onOpenMenu={() => setMenuOpen(true)}
-        projectName={projectName}
-        saveStatus={saveStatusLabel}
-        basemapEnabled={basemap.enabled}
-        onToggleBasemap={() => setBasemap((b) => ({ ...b, enabled: !b.enabled }))}
-        onShowHelp={() => setShowHelp((s) => !s)}
+      {/* Top Bar (hideable — double-tap top edge to restore) */}
+      {!topBarHidden ? (
+        <TopBar
+          onOpenMenu={() => setMenuOpen(true)}
+          projectName={projectName}
+          saveStatus={saveStatusLabel}
+          basemapEnabled={basemap.enabled}
+          onToggleBasemap={() => setBasemap((b) => ({ ...b, enabled: !b.enabled }))}
+          onShowHelp={() => setShowHelp((s) => !s)}
+          hand={hand}
+          onToggleHand={toggleHand}
+        />
+      ) : (
+        <button
+          onClick={() => setTopBarHidden(false)}
+          className="fixed top-0 left-1/2 -translate-x-1/2 z-40 min-w-[44px] min-h-[24px]
+                     bg-cad-surface/60 backdrop-blur-sm border-b border-cad-accent/50 rounded-b-lg
+                     text-cad-dim/40 hover:text-cad-dim text-xs transition-colors px-4"
+          title="Show top bar"
+        >
+          ▼
+        </button>
+      )}
+
+      {/* Shortcut Bar — opposite side of tool panel */}
+      <ShortcutBar
         hand={hand}
-        onToggleHand={toggleHand}
+        collapsed={shortcutBarCollapsed}
+        onToggleCollapse={() => setShortcutBarCollapsed(c => !c)}
+        onExecuteAction={executeCommand}
+        activeTool={cadTool}
+        activeMode={mode}
       />
 
       {/* Side Panel */}
@@ -1352,11 +1525,11 @@ export const CADCanvas: React.FC = () => {
         onSaveAs={() => {
           window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, metaKey: true, shiftKey: true }));
         }}
-        onShare={() => { /* TODO: trigger share dialog */ }}
-        canShare={false}
-        signedIn={false}
-        onSignIn={() => { /* handled by ProjectBar */ }}
-        onSignOut={() => { /* handled by ProjectBar */ }}
+        onShare={() => projectBarRef.current?.triggerShare()}
+        canShare={projectBarRef.current?.canShare ?? false}
+        signedIn={projectBarRef.current?.signedIn ?? false}
+        onSignIn={() => projectBarRef.current?.signIn()}
+        onSignOut={() => projectBarRef.current?.signOut()}
         onImportDXF={() => dxfFileInputRef.current?.click()}
         onExportDXF={() => executeCommand('file:export')}
         onExportPDF={() => setShowImportExportPDF(true)}
@@ -1375,7 +1548,20 @@ export const CADCanvas: React.FC = () => {
         onZoomIn={() => setView((v) => ({ ...v, zoom: Math.min(v.zoom * 1.5, 32) }))}
         onZoomOut={() => setView((v) => ({ ...v, zoom: Math.max(v.zoom / 1.5, 0.05) }))}
         onShowHelp={() => setShowHelp(true)}
+        onShowProjectFiles={() => setShowProjectFiles(true)}
+        onShowRevisionHistory={() => setShowRevisionHistory(true)}
         onClearAll={handleClearCanvas}
+        topBarHidden={topBarHidden}
+        onToggleTopBar={() => setTopBarHidden(h => !h)}
+        statusBarHidden={statusBarHidden}
+        onToggleStatusBar={() => setStatusBarHidden(h => !h)}
+        cmdLineHidden={cmdLineHidden}
+        onToggleCmdLine={() => setCmdLineHidden(h => !h)}
+        shortcutBarCollapsed={shortcutBarCollapsed}
+        onToggleShortcutBar={() => setShortcutBarCollapsed(c => !c)}
+        sidePanelCollapsed={sidePanelCollapsed}
+        onToggleSidePanel={() => setSidePanelCollapsed(c => !c)}
+        installPrompt={installPrompt}
       />
 
       {/* Canvas — positioned to avoid overlapping with side panel and top bar */}
@@ -1389,7 +1575,7 @@ export const CADCanvas: React.FC = () => {
           width: `${canvasWidth}px`,
           height: `${canvasHeight}px`,
           cursor: mode === 'cad'
-            ? (cadTool === 'select' || cadTool === 'move' ? 'grab' : 'crosshair')
+            ? (cadTool === 'select' ? (selectedElementId ? 'move' : 'default') : cadTool === 'move' ? 'grab' : 'crosshair')
             : mode === 'draw' || mode === 'color'
               ? 'default'
               : 'text',
@@ -1405,6 +1591,7 @@ export const CADCanvas: React.FC = () => {
       {/* Hidden ProjectBar (still handles Drive auth + save/open logic, rendered off-screen) */}
       <div className="hidden">
         <ProjectBar
+          ref={projectBarRef}
           elements={elements}
           layers={layers}
           grid={grid}
@@ -1455,6 +1642,15 @@ export const CADCanvas: React.FC = () => {
           onClose={() => setShowSurvaiPanel(false)}
         />
       )}
+
+      {/* Blueprint Comparison panel */}
+      <BlueprintPanel
+        isOpen={showBlueprintPanel}
+        onClose={() => setShowBlueprintPanel(false)}
+        activeScanId={activeScanId}
+        onBlueprintImported={handleBlueprintImported}
+        onDeviationsComputed={handleDeviationsComputed}
+      />
 
       {/* Interior Panel */}
       {showInteriorPanel && (
@@ -1553,54 +1749,58 @@ export const CADCanvas: React.FC = () => {
         />
       )}
 
-      {/* Command Line — bottom of canvas area */}
-      <div
-        className="absolute left-0 right-0 z-30"
-        style={{
-          bottom: 0,
-          marginLeft: `${canvasLeftOffset}px`,
-          marginRight: `${hand === 'right' ? sidePanelWidth : 0}px`,
-        }}
-      >
-        <CommandLine
-          prompt={cmdPrompt}
-          history={cmdHistory}
-          visible={cmdVisible}
-          focused={cmdFocused}
-          onFocusChange={setCmdFocused}
-          onExecute={handleCommandExecute}
-          onCancel={handleCommandCancel}
-          pendingInput={pendingInput}
-          onNumericInput={handleNumericInputCmd}
-          gridUnit={grid.unit}
-        />
-      </div>
+      {/* Command Line — bottom of canvas area (hideable) */}
+      {!cmdLineHidden && (
+        <div
+          className="absolute left-0 right-0 z-30"
+          style={{
+            bottom: statusBarHidden ? 0 : '24px',
+            marginLeft: `${canvasLeftOffset}px`,
+            marginRight: `${hand === 'right' ? sidePanelWidth : 0}px`,
+          }}
+        >
+          <CommandLine
+            prompt={cmdPrompt}
+            history={cmdHistory}
+            visible={cmdVisible}
+            focused={cmdFocused}
+            onFocusChange={setCmdFocused}
+            onExecute={handleCommandExecute}
+            onCancel={handleCommandCancel}
+            pendingInput={pendingInput}
+            onNumericInput={handleNumericInputCmd}
+            gridUnit={grid.unit}
+          />
+        </div>
+      )}
 
-      {/* Status Bar — very bottom strip, spans canvas area only */}
-      <div
-        className="absolute z-20"
-        style={{
-          bottom: 0,
-          left: `${canvasLeftOffset}px`,
-          right: `${hand === 'right' ? sidePanelWidth : 0}px`,
-        }}
-      >
-        <StatusBar
-          mode={mode}
-          cadTool={cadTool}
-          grid={grid}
-          layers={layers}
-          activeLayerId={getActiveLayer()}
-          cursorX={cursorX}
-          cursorY={cursorY}
-          zoom={view.zoom}
-          elementCount={elements.length}
-          orthoMode={orthoMode}
-          prompt={statusPrompt}
-          onClearAll={handleClearCanvas}
-          onResetView={resetView}
-        />
-      </div>
+      {/* Status Bar — very bottom strip, spans canvas area only (hideable) */}
+      {!statusBarHidden && (
+        <div
+          className="absolute z-20"
+          style={{
+            bottom: 0,
+            left: `${canvasLeftOffset}px`,
+            right: `${hand === 'right' ? sidePanelWidth : 0}px`,
+          }}
+        >
+          <StatusBar
+            mode={mode}
+            cadTool={cadTool}
+            grid={grid}
+            layers={layers}
+            activeLayerId={getActiveLayer()}
+            cursorX={cursorX}
+            cursorY={cursorY}
+            zoom={view.zoom}
+            elementCount={elements.length}
+            orthoMode={orthoMode}
+            prompt={statusPrompt}
+            onClearAll={handleClearCanvas}
+            onResetView={resetView}
+          />
+        </div>
+      )}
 
       {/* Inline text editor (double-click to edit) */}
       {editingTextId && editingTextPos && (
@@ -1634,8 +1834,45 @@ export const CADCanvas: React.FC = () => {
         </div>
       )}
 
+      {/* Save failure toast — prominent notification for auto-save errors */}
+      {saveStatusLabel === 'error' && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-red-900/95 border border-red-500 text-red-100 px-4 py-2 rounded-lg shadow-lg flex items-center gap-3 text-sm animate-pulse">
+          <svg className="w-4 h-4 text-red-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <span>Auto-save failed — your work is not saved to Drive. Try saving manually (Ctrl+S).</span>
+          <button onClick={() => projectBarRef.current?.save()} className="px-2 py-1 bg-red-700 hover:bg-red-600 rounded text-xs font-medium whitespace-nowrap">
+            Retry Save
+          </button>
+        </div>
+      )}
+
       {/* Help Panel */}
       <HelpPanel open={showHelp} onClose={() => setShowHelp(false)} />
+
+      {/* Revision History Panel */}
+      <RevisionHistoryPanel
+        open={showRevisionHistory}
+        onClose={() => setShowRevisionHistory(false)}
+        fileId={projectBarRef.current?.currentFileId ?? null}
+        signedIn={projectBarRef.current?.signedIn ?? false}
+        onRestore={(project) => {
+          // Apply the restored project state to the canvas
+          if (project.elements) {
+            setElements(project.elements);
+            setHistoryState(createHistory(project.elements));
+          }
+          setShowRevisionHistory(false);
+        }}
+      />
+
+      {/* Project Files Panel (Client Notes + Materials) */}
+      <ProjectFilesPanel
+        open={showProjectFiles}
+        onClose={() => setShowProjectFiles(false)}
+        clientName={clientName || undefined}
+        signedIn={projectBarRef.current?.signedIn ?? false}
+      />
 
       {/* Support Widget */}
       <SupportWidget />

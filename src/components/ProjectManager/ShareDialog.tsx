@@ -1,5 +1,5 @@
 /**
- * ShareDialog — share a Netrun CAD project with a client or collaborator.
+ * ShareDialog — share a Survai Construction project with a client or collaborator.
  */
 
 import React, { useState, useCallback } from 'react';

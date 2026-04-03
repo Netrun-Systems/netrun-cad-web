@@ -12,9 +12,9 @@ export interface StrokePoint extends Point {
   timestamp?: number;
 }
 
-export type AppMode = 'cad' | 'draw' | 'color' | 'text';
+export type AppMode = 'cad' | 'draw' | 'color' | 'text' | 'route';
 
-export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move';
+export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move' | 'route';
 
 export type DrawBrush = 'pen' | 'pencil' | 'marker';
 export type ColorBrush = 'watercolor' | 'marker' | 'fill';
@@ -183,6 +183,12 @@ export const DEFAULT_LAYERS: Layer[] = [
   { id: 'drawing', name: 'Drawing', visible: true, locked: false, opacity: 1, color: '#333333', order: 5 },
   { id: 'color', name: 'Color', visible: true, locked: false, opacity: 1, color: '#66bb6a', order: 6 },
   { id: 'text', name: 'Text', visible: true, locked: false, opacity: 1, color: '#212121', order: 7 },
+  { id: 'blueprint', name: 'Blueprint (Plan)', visible: true, locked: true, opacity: 0.6, color: '#9ca3af', order: -4 },
+  { id: 'deviations', name: 'Deviations', visible: true, locked: false, opacity: 1, color: '#ef4444', order: 8 },
+  { id: 'electrical-route', name: 'Electrical Route', visible: true, locked: false, opacity: 1, color: '#f59e0b', order: 9 },
+  { id: 'plumbing-route', name: 'Plumbing Route', visible: true, locked: false, opacity: 1, color: '#3b82f6', order: 10 },
+  { id: 'hvac-route', name: 'HVAC Route', visible: true, locked: false, opacity: 1, color: '#06b6d4', order: 11 },
+  { id: 'low-voltage-route', name: 'Low Voltage Route', visible: true, locked: false, opacity: 1, color: '#8b5cf6', order: 12 },
 ];
 
 export const DEFAULT_GRID: GridSettings = {

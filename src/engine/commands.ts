@@ -138,6 +138,14 @@ export const COMMANDS: Command[] = [
   { aliases: ['gis'],                   action: 'file:gis',             description: 'Import GIS / GeoJSON data',   requiresPoints: 0, category: 'landscape' },
   { aliases: ['clearall', 'cl'],        action: 'file:clearall',        description: 'Clear all elements',          requiresPoints: 0, category: 'landscape' },
   { aliases: ['help', '?'],            action: 'help',                  description: 'Show command help',           requiresPoints: 0, category: 'file' },
+
+  // ── SURVAI (3D scan / deviation / routing) ────────────────────────────────
+  { aliases: ['3dview', '3d'],          action: 'toggle3DView',          description: 'Toggle 3D viewport',          requiresPoints: 0, category: 'survai' },
+  { aliases: ['blueprint', 'bp'],       action: 'openBlueprintPanel',    description: 'Upload blueprint DXF',        requiresPoints: 0, category: 'survai' },
+  { aliases: ['deviation', 'dev'],      action: 'runDeviation',          description: 'Run deviation comparison',    requiresPoints: 0, category: 'survai' },
+  { aliases: ['devexport'],             action: 'exportDeviationDXF',    description: 'Export deviations as DXF',    requiresPoints: 0, category: 'survai' },
+  { aliases: ['route', 'rt'],           action: 'setRouteMode',          description: 'Enter route editing mode',    requiresPoints: 0, category: 'survai' },
+  { aliases: ['cost', 'estimate'],      action: 'openCostPanel',         description: 'Show cost estimation',        requiresPoints: 0, category: 'survai' },
 ];
 
 // ─── Lookup helpers ───────────────────────────────────────────────────────────

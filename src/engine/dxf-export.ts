@@ -459,16 +459,16 @@ function downloadText(filename: string, content: string): void {
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Export the current drawing state to a DXF R2013 file and trigger download.
+ * Generate DXF string from the current drawing state.
+ * Can be used for both download and Drive upload.
  */
-export function exportDXF(state: DrawingState, filename = 'landscape-plan.dxf'): void {
+export function generateDXFString(state: DrawingState): string {
   handleCounter = 0x100; // reset handle counter
 
   const layerMap = new Map(state.layers.map((l) => [l.id, l]));
   const visibleLayers = state.layers.filter((l) => l.visible);
   const layerNames = visibleLayers.map((l) => l.name);
 
-  // Collect entity strings
   const entityStrings: string[] = [];
 
   for (const el of state.elements) {
@@ -478,7 +478,7 @@ export function exportDXF(state: DrawingState, filename = 'landscape-plan.dxf'):
     entityStrings.push(...entities);
   }
 
-  const dxf = [
+  return [
     dxfHeader(),
     dxfClasses(),
     dxfTables(layerNames),
@@ -489,6 +489,12 @@ export function exportDXF(state: DrawingState, filename = 'landscape-plan.dxf'):
     `  0\nSECTION\n  2\nOBJECTS\n  0\nDICTIONARY\n  5\n${nextHandle()}\n100\nAcDbDictionary\n281\n1\n  0\nENDSEC`,
     `  0\nEOF`,
   ].join('\n');
+}
 
+/**
+ * Export the current drawing state to a DXF R2013 file and trigger download.
+ */
+export function exportDXF(state: DrawingState, filename = 'landscape-plan.dxf'): void {
+  const dxf = generateDXFString(state);
   downloadText(filename, dxf);
 }

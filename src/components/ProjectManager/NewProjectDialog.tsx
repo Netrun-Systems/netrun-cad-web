@@ -1,5 +1,5 @@
 /**
- * NewProjectDialog — creates a new Netrun CAD project.
+ * NewProjectDialog — creates a new Survai Construction project.
  * Collects project name, client name, and address.
  */
 
