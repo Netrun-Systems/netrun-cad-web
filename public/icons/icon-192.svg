@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <rect width="192" height="192" rx="32" fill="#0f0f23"/>
+  <rect x="8" y="8" width="176" height="176" rx="24" fill="none" stroke="#4f46e5" stroke-width="2"/>
+  <!-- Grid lines -->
+  <line x1="48" y1="24" x2="48" y2="168" stroke="#4f46e5" stroke-width="0.5" opacity="0.3"/>
+  <line x1="96" y1="24" x2="96" y2="168" stroke="#4f46e5" stroke-width="0.5" opacity="0.3"/>
+  <line x1="144" y1="24" x2="144" y2="168" stroke="#4f46e5" stroke-width="0.5" opacity="0.3"/>
+  <line x1="24" y1="48" x2="168" y2="48" stroke="#4f46e5" stroke-width="0.5" opacity="0.3"/>
+  <line x1="24" y1="96" x2="168" y2="96" stroke="#4f46e5" stroke-width="0.5" opacity="0.3"/>
+  <line x1="24" y1="144" x2="168" y2="144" stroke="#4f46e5" stroke-width="0.5" opacity="0.3"/>
+  <!-- Blueprint lines (as-planned) -->
+  <rect x="40" y="55" width="70" height="82" fill="none" stroke="#6366f1" stroke-width="2" stroke-dasharray="4 3" opacity="0.6"/>
+  <!-- Scan detection markers -->
+  <circle cx="55" cy="75" r="6" fill="#f59e0b" opacity="0.9"/>
+  <circle cx="95" cy="95" r="6" fill="#3b82f6" opacity="0.9"/>
+  <circle cx="70" cy="120" r="6" fill="#06b6d4" opacity="0.9"/>
+  <!-- Deviation arrow -->
+  <line x1="110" y1="55" x2="130" y2="70" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"/>
+  <polygon points="130,70 124,64 120,72" fill="#ef4444"/>
+  <!-- S -->
+  <text x="138" y="145" text-anchor="middle" font-family="system-ui, sans-serif" font-size="48" font-weight="800" fill="#818cf8">S</text>
+</svg>

@@ -1,0 +1,27 @@
+{
+  "name": "Survai Construction",
+  "short_name": "Survai",
+  "description": "Construction CAD with 3D scan detection, blueprint comparison, and MEP route estimation. Tablet-first with keyboard shortcuts.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f0f23",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["design", "productivity", "business"],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
