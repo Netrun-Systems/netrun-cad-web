@@ -63,6 +63,9 @@ import { AppMenu } from '../Menu/AppMenu';
 import { useHandedness } from '../../hooks/useHandedness';
 import { useOrientation } from '../../hooks/useOrientation';
 import { SupportWidget } from '../SupportWidget/SupportWidget';
+import { PricingPage } from '../Pricing/PricingPage';
+import { AccountPanel } from '../Account/AccountPanel';
+import useAuth from '../../contexts/AuthContext';
 import { ShortcutBar } from '../ShortcutBar/ShortcutBar';
 import { useInstallPrompt } from '../../hooks/useInstallPrompt';
 import { ProjectFilesPanel } from '../ProjectManager/ProjectFilesPanel';
@@ -80,6 +83,7 @@ const LONG_PRESS_MS = 600;
 export const CADCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
+  const { user, logout } = useAuth();
 
   // ── App state ──────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<AppMode>('cad');
@@ -234,6 +238,8 @@ export const CADCanvas: React.FC = () => {
   const [showImportExportPDF, setShowImportExportPDF] = useState(false);
   const [showGISModal, setShowGISModal] = useState(false);
   const [showScanModal, setShowScanModal] = useState(false);
+  const [showPricingPage, setShowPricingPage] = useState(false);
+  const [showAccountPanel, setShowAccountPanel] = useState(false);
 
   const handleBasemapChange = useCallback((updates: Partial<BasemapState>) => {
     setBasemap((prev) => ({ ...prev, ...updates }));
@@ -458,6 +464,8 @@ export const CADCanvas: React.FC = () => {
         case 'panel:survai':    setShowSurvaiPanel((s) => !s); break;
         case 'panel:files':     setShowProjectFiles((s) => !s); break;
         case 'panel:history':   setShowRevisionHistory((s) => !s); break;
+        case 'panel:pricing':   setShowPricingPage((s) => !s); break;
+        case 'panel:account':   setShowAccountPanel((s) => !s); break;
 
         // Landscape
         case 'panel:plants':    setShowPlantPanel((s) => !s); break;
@@ -1562,6 +1570,8 @@ export const CADCanvas: React.FC = () => {
         sidePanelCollapsed={sidePanelCollapsed}
         onToggleSidePanel={() => setSidePanelCollapsed(c => !c)}
         installPrompt={installPrompt}
+        onShowPricing={() => setShowPricingPage(true)}
+        onShowAccount={() => setShowAccountPanel(true)}
       />
 
       {/* Canvas — positioned to avoid overlapping with side panel and top bar */}
@@ -1872,6 +1882,21 @@ export const CADCanvas: React.FC = () => {
         onClose={() => setShowProjectFiles(false)}
         clientName={clientName || undefined}
         signedIn={projectBarRef.current?.signedIn ?? false}
+      />
+
+      {/* Pricing Page */}
+      <PricingPage
+        isOpen={showPricingPage}
+        onClose={() => setShowPricingPage(false)}
+      />
+
+      {/* Account Panel */}
+      <AccountPanel
+        isOpen={showAccountPanel}
+        onClose={() => setShowAccountPanel(false)}
+        user={user}
+        onShowPricing={() => setShowPricingPage(true)}
+        onSignOut={() => { logout(); }}
       />
 
       {/* Support Widget */}

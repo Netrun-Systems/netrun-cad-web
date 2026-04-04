@@ -62,6 +62,10 @@ export interface AppMenuProps {
   // Clear
   onClearAll: () => void;
 
+  // Account / Pricing
+  onShowPricing: () => void;
+  onShowAccount: () => void;
+
   // PWA install
   installPrompt: {
     canInstall: boolean;
@@ -178,6 +182,8 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   sidePanelCollapsed,
   onToggleSidePanel,
   installPrompt,
+  onShowPricing,
+  onShowAccount,
 }) => {
   const [showInstallHelp, setShowInstallHelp] = useState(false);
   // Close on Escape
@@ -305,6 +311,11 @@ export const AppMenu: React.FC<AppMenuProps> = ({
             <MenuItem label={sidePanelCollapsed ? 'Show Tool Panel' : 'Hide Tool Panel'} icon="🎛️" onClick={action(onToggleSidePanel)} active={!sidePanelCollapsed} />
             <MenuItem label={statusBarHidden ? 'Show Status Bar' : 'Hide Status Bar'} icon="📊" onClick={action(onToggleStatusBar)} active={!statusBarHidden} />
             <MenuItem label={cmdLineHidden ? 'Show Command Line' : 'Hide Command Line'} icon="⌨️" onClick={action(onToggleCmdLine)} active={!cmdLineHidden} />
+          </MenuSection>
+
+          <MenuSection title="Account">
+            <MenuItem label="Pricing & Plans" icon="💳" onClick={action(onShowPricing)} />
+            <MenuItem label="My Account" icon="👤" onClick={action(onShowAccount)} />
           </MenuSection>
 
           <MenuSection title="Help">

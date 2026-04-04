@@ -140,6 +140,10 @@ export const COMMANDS: Command[] = [
   { aliases: ['help', '?'],            action: 'help',                  description: 'Show command help',           requiresPoints: 0, category: 'file' },
 
   // ── SURVAI (3D scan / deviation / routing) ────────────────────────────────
+  { aliases: ['pricing', 'plans'],      action: 'panel:pricing',         description: 'Open pricing page',           requiresPoints: 0, category: 'file' },
+  { aliases: ['account', 'profile'],    action: 'panel:account',         description: 'Open account panel',          requiresPoints: 0, category: 'file' },
+
+  // ── SURVAI (3D scan / deviation / routing) ────────────────────────────────
   { aliases: ['3dview', '3d'],          action: 'toggle3DView',          description: 'Toggle 3D viewport',          requiresPoints: 0, category: 'survai' },
   { aliases: ['blueprint', 'bp'],       action: 'openBlueprintPanel',    description: 'Upload blueprint DXF',        requiresPoints: 0, category: 'survai' },
   { aliases: ['deviation', 'dev'],      action: 'runDeviation',          description: 'Run deviation comparison',    requiresPoints: 0, category: 'survai' },

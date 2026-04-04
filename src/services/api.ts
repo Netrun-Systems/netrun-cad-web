@@ -65,6 +65,15 @@ export interface RouteTypeInfo {
   material_categories: string[];
 }
 
+export interface SubscriptionInfo {
+  id: string;
+  status: 'active' | 'trialing' | 'past_due' | 'canceled' | 'incomplete';
+  tier: 'starter' | 'pro' | 'team' | 'pilot' | 'enterprise';
+  current_period_end: string;
+  seats: number;
+  cancel_at_period_end: boolean;
+}
+
 class ApiClient {
   private client: AxiosInstance;
   private refreshPromise: Promise<string> | null = null;
@@ -281,6 +290,34 @@ class ApiClient {
 
   async getLaborRates(): Promise<Record<string, number>> {
     const response = await this.client.get<Record<string, number>>('/api/v1/materials/labor-rates');
+    return response.data;
+  }
+
+  // ── Stripe / Billing ───────────────────────────────────
+
+  async createCheckoutSession(priceId: string, seats?: number): Promise<{ url: string }> {
+    const response = await this.client.post<{ url: string }>('/api/v1/billing/checkout', {
+      price_id: priceId,
+      quantity: seats || 1,
+      success_url: `${window.location.origin}/?checkout=success`,
+      cancel_url: `${window.location.origin}/?checkout=cancel`,
+    });
+    return response.data;
+  }
+
+  async getSubscription(): Promise<SubscriptionInfo | null> {
+    try {
+      const response = await this.client.get<SubscriptionInfo>('/api/v1/billing/subscription');
+      return response.data;
+    } catch {
+      return null;
+    }
+  }
+
+  async createPortalSession(): Promise<{ url: string }> {
+    const response = await this.client.post<{ url: string }>('/api/v1/billing/portal', {
+      return_url: window.location.origin,
+    });
     return response.data;
   }
 
