@@ -16,7 +16,7 @@ const MODES: { key: AppMode; label: string; shortcut: string; icon: string }[] =
 export const ModeToolbar: React.FC<ModeToolbarProps> = ({ mode, setMode }) => {
   return (
     <div className="absolute top-2 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-cad-surface/95 backdrop-blur-sm border border-cad-accent rounded-lg px-2 py-1 z-20">
-      <span className="text-cad-dim text-xs mr-2 font-medium tracking-wider">NETRUN CAD</span>
+      <span className="text-cad-dim text-xs mr-2 font-medium tracking-wider">SURVAI</span>
       {MODES.map((m) => (
         <button
           key={m.key}

@@ -11,6 +11,7 @@ import type { DeviationReport as RendererDeviationReport } from '../../engine/de
 import { api } from '../../services/api';
 import type { BlueprintUploadResponse } from '../../services/blueprints';
 import type { DeviationReport } from '../../services/blueprints';
+import { useAuth } from '../../contexts/AuthContext';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,7 @@ export interface BlueprintPanelProps {
   activeScanId: string | null;
   onBlueprintImported: (elements: CADElement[], blueprintId: string) => void;
   onDeviationsComputed: (elements: CADElement[]) => void;
+  onShowPricing?: () => void;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -30,7 +32,9 @@ export default function BlueprintPanel({
   activeScanId,
   onBlueprintImported,
   onDeviationsComputed,
+  onShowPricing,
 }: BlueprintPanelProps) {
+  const { isAuthenticated } = useAuth();
   // Upload state
   const [isUploading, setIsUploading] = useState(false);
   const [uploadResponse, setUploadResponse] = useState<BlueprintUploadResponse | null>(null);
@@ -310,27 +314,36 @@ export default function BlueprintPanel({
               </div>
             </div>
 
-            {/* Compare button */}
-            <button
-              onClick={handleCompare}
-              disabled={isComparing}
-              className={`
-                w-full py-2 rounded text-sm font-medium transition-colors
-                ${isComparing
-                  ? 'bg-gray-700 text-gray-400 cursor-wait'
-                  : 'bg-cyan-600 hover:bg-cyan-500 text-white'
-                }
-              `}
-            >
-              {isComparing ? (
-                <span className="flex items-center justify-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Comparing...
-                </span>
-              ) : (
-                'Compare'
-              )}
-            </button>
+            {/* Compare button — gated to authenticated users (Pro+) */}
+            {!isAuthenticated ? (
+              <button
+                onClick={onShowPricing}
+                className="w-full py-2 rounded text-sm font-medium transition-colors bg-indigo-600 hover:bg-indigo-500 text-white"
+              >
+                Upgrade to Pro to Compare
+              </button>
+            ) : (
+              <button
+                onClick={handleCompare}
+                disabled={isComparing}
+                className={`
+                  w-full py-2 rounded text-sm font-medium transition-colors
+                  ${isComparing
+                    ? 'bg-gray-700 text-gray-400 cursor-wait'
+                    : 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                  }
+                `}
+              >
+                {isComparing ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Comparing...
+                  </span>
+                ) : (
+                  'Compare'
+                )}
+              </button>
+            )}
 
             {compareError && (
               <div className="mt-2 text-xs text-red-400 bg-red-950/30 rounded px-3 py-2">

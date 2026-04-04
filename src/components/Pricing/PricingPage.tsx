@@ -5,6 +5,8 @@
 
 import React, { useState } from 'react';
 import { api } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
+import { LoginModal } from '../Auth/LoginModal';
 
 // ── Stripe Price IDs (LIVE) ─────────────────────────────────────────────────
 
@@ -109,22 +111,53 @@ export const PricingPage: React.FC<PricingPageProps> = ({ isOpen, onClose, curre
   const [annual, setAnnual] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [pendingPriceId, setPendingPriceId] = useState<string | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
+  const { isAuthenticated } = useAuth();
 
   if (!isOpen) return null;
 
-  const handleCheckout = async (tierKey: string) => {
-    setLoading(tierKey);
+  const startCheckout = async (priceId: string) => {
+    setLoading('checkout');
     setError('');
     try {
-      const prices = PRICES[tierKey as keyof typeof PRICES];
-      if (!prices || typeof prices === 'string') return;
-      const priceId = annual ? prices.annual : prices.monthly;
       const { url } = await api.createCheckoutSession(priceId);
       window.location.href = url;
     } catch {
       setError('Failed to start checkout. Please try again.');
     } finally {
       setLoading(null);
+    }
+  };
+
+  const handleCheckout = async (tierKey: string) => {
+    const prices = PRICES[tierKey as keyof typeof PRICES];
+    if (!prices || typeof prices === 'string') return;
+    const priceId = annual ? prices.annual : prices.monthly;
+
+    if (!isAuthenticated) {
+      setPendingPriceId(priceId);
+      setShowLogin(true);
+      return;
+    }
+
+    setLoading(tierKey);
+    setError('');
+    try {
+      const { url } = await api.createCheckoutSession(priceId);
+      window.location.href = url;
+    } catch {
+      setError('Failed to start checkout. Please try again.');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleLoginSuccess = () => {
+    setShowLogin(false);
+    if (pendingPriceId) {
+      startCheckout(pendingPriceId);
+      setPendingPriceId(null);
     }
   };
 
@@ -280,11 +313,26 @@ export const PricingPage: React.FC<PricingPageProps> = ({ isOpen, onClose, curre
           </div>
 
           {/* Footer */}
-          <div className="text-center pb-6 text-gray-500 text-xs">
+          <div className="text-center pb-4 text-gray-500 text-xs">
             All plans include a 14-day free trial. Cancel anytime.
+          </div>
+          <div className="text-center pb-6">
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-gray-300 text-xs transition-colors"
+            >
+              or continue in Demo Mode
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Login modal for unauthenticated checkout */}
+      <LoginModal
+        isOpen={showLogin}
+        onClose={() => { setShowLogin(false); setPendingPriceId(null); }}
+        onLoginSuccess={handleLoginSuccess}
+      />
     </>
   );
 };

@@ -6,7 +6,7 @@
  * the Google Drive service.
  */
 
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { googleDrive } from '../../services/google-drive';
 import type { NetrunCADProject, DriveFile } from '../../services/google-drive';
 import type { CADElement, Layer, GridSettings } from '../../engine/types';
@@ -15,6 +15,8 @@ import { NewProjectDialog } from './NewProjectDialog';
 import type { NewProjectOptions } from './NewProjectDialog';
 import { ProjectList } from './ProjectList';
 import { ShareDialog } from './ShareDialog';
+import { generateDXFString } from '../../engine/dxf-export';
+import { renderToPNGBlob } from '../../engine/png-export';
 
 // ── Save status indicator ──────────────────────────────────────────────────────
 
@@ -44,16 +46,32 @@ export interface ProjectBarProps {
   onOpenProject: (project: NetrunCADProject) => void;
 }
 
+// ── Imperative handle for parent access ────────────────────────────────────────
+
+export interface ProjectBarHandle {
+  signedIn: boolean;
+  canShare: boolean;
+  saveStatus: SaveStatus;
+  projectName: string;
+  clientName: string;
+  currentFileId: string | null;
+  signIn: () => Promise<void>;
+  signOut: () => void;
+  triggerShare: () => void;
+  save: () => Promise<void>;
+  saveAs: () => Promise<void>;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export const ProjectBar: React.FC<ProjectBarProps> = ({
+export const ProjectBar = forwardRef<ProjectBarHandle, ProjectBarProps>(({
   elements,
   layers,
   grid,
   basemap,
   onNewProject,
   onOpenProject,
-}) => {
+}, ref) => {
   // Project meta
   const [projectName, setProjectName] = useState('Untitled Project');
   const [clientName, setClientName] = useState('');
@@ -104,6 +122,46 @@ export const ProjectBar: React.FC<ProjectBarProps> = ({
     setSaveStatus('idle');
   }, []);
 
+  // ── Companion file exports (DXF + PNG, run after each save) ────────────────
+
+  const exportCompanionFiles = useCallback(async (projectName: string, clientName?: string) => {
+    try {
+      const els = elementsRef.current;
+      const lyrs = layersRef.current;
+      const grd = gridRef.current;
+      const baseName = projectName.replace(/\.[^.]+$/, '');
+
+      // DXF companion
+      const dxfString = generateDXFString({
+        elements: els,
+        layers: lyrs,
+        activeLayerId: '',
+        gridSettings: grd,
+        view: { offsetX: 0, offsetY: 0, zoom: 1 },
+      });
+      googleDrive.saveCompanionFile(
+        dxfString,
+        `${baseName}.dxf`,
+        'application/dxf',
+        clientName,
+      ).catch((err) => console.warn('DXF companion export failed:', err));
+
+      // PNG companion (transparent drawing layer)
+      const pngBlob = await renderToPNGBlob(els, lyrs, grd);
+      if (pngBlob) {
+        googleDrive.saveCompanionFile(
+          pngBlob,
+          `${baseName}.png`,
+          'image/png',
+          clientName,
+        ).catch((err) => console.warn('PNG companion export failed:', err));
+      }
+    } catch (err) {
+      // Companion exports are non-critical — log but don't fail the save
+      console.warn('Companion export error:', err);
+    }
+  }, []);
+
   // ── Build project snapshot ─────────────────────────────────────────────────
 
   const buildSnapshot = useCallback((): NetrunCADProject => {
@@ -126,17 +184,19 @@ export const ProjectBar: React.FC<ProjectBarProps> = ({
     setSaveStatus('saving');
     try {
       const project = buildSnapshot();
-      const fileId = await googleDrive.saveProject(project, currentFileId ?? undefined);
+      const fileId = await googleDrive.saveProject(project, currentFileId ?? undefined, true /* pin revision */);
       setCurrentFileId(fileId);
       setCurrentProject(project);
       lastSaveRef.current = JSON.stringify({ elements, layers });
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 3000);
+      // Export DXF + PNG companions in background (non-blocking)
+      exportCompanionFiles(project.name, project.client);
     } catch (err) {
       console.error('Save failed:', err);
       setSaveStatus('error');
     }
-  }, [signedIn, handleSignIn, buildSnapshot, currentFileId, elements, layers]);
+  }, [signedIn, handleSignIn, buildSnapshot, currentFileId, elements, layers, exportCompanionFiles]);
 
   const handleSaveAs = useCallback(async () => {
     if (!signedIn) {
@@ -152,11 +212,29 @@ export const ProjectBar: React.FC<ProjectBarProps> = ({
       lastSaveRef.current = JSON.stringify({ elements, layers });
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 3000);
+      // Export DXF + PNG companions in background
+      exportCompanionFiles(project.name, project.client);
     } catch (err) {
       console.error('Save As failed:', err);
       setSaveStatus('error');
     }
-  }, [signedIn, handleSignIn, buildSnapshot, elements, layers]);
+  }, [signedIn, handleSignIn, buildSnapshot, elements, layers, exportCompanionFiles]);
+
+  // ── Expose state to parent via ref ────────────────────────────────────────
+
+  useImperativeHandle(ref, () => ({
+    get signedIn() { return signedIn; },
+    get canShare() { return signedIn && !!currentFileId; },
+    get saveStatus() { return saveStatus; },
+    get projectName() { return projectName; },
+    get clientName() { return clientName; },
+    get currentFileId() { return currentFileId; },
+    signIn: handleSignIn,
+    signOut: handleSignOut,
+    triggerShare: () => setShowShareDialog(true),
+    save: handleSave,
+    saveAs: handleSaveAs,
+  }), [signedIn, currentFileId, saveStatus, projectName, handleSignIn, handleSignOut, handleSave, handleSaveAs]);
 
   // ── Auto-save ──────────────────────────────────────────────────────────────
 
@@ -186,8 +264,13 @@ export const ProjectBar: React.FC<ProjectBarProps> = ({
         lastSaveRef.current = JSON.stringify({ elements, layers });
         setSaveStatus('saved');
         setTimeout(() => setSaveStatus('idle'), 3000);
-      } catch {
+        // Companion exports in background (non-blocking, throttled to auto-save interval)
+        exportCompanionFiles(project.name, project.client);
+      } catch (err) {
+        console.error('Auto-save failed:', err);
         setSaveStatus('error');
+        // Auto-clear error after 10 seconds so it doesn't stick forever
+        setTimeout(() => setSaveStatus((s) => s === 'error' ? 'unsaved' : s), 10_000);
       }
     }, 30_000);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -448,4 +531,6 @@ export const ProjectBar: React.FC<ProjectBarProps> = ({
       )}
     </>
   );
-};
+});
+
+ProjectBar.displayName = 'ProjectBar';

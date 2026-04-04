@@ -74,6 +74,7 @@ import type { Detection3D } from '../Viewport3D/ModelViewer3D';
 import SplitView from '../SplitView/SplitView';
 import ModelViewer3D from '../Viewport3D/ModelViewer3D';
 import BlueprintPanel from '../BlueprintPanel/BlueprintPanel';
+import { WelcomeModal } from '../Welcome/WelcomeModal';
 
 let plantPlaceId = 1;
 
@@ -240,6 +241,7 @@ export const CADCanvas: React.FC = () => {
   const [showScanModal, setShowScanModal] = useState(false);
   const [showPricingPage, setShowPricingPage] = useState(false);
   const [showAccountPanel, setShowAccountPanel] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('survai_visited'));
 
   const handleBasemapChange = useCallback((updates: Partial<BasemapState>) => {
     setBasemap((prev) => ({ ...prev, ...updates }));
@@ -1660,6 +1662,7 @@ export const CADCanvas: React.FC = () => {
         activeScanId={activeScanId}
         onBlueprintImported={handleBlueprintImported}
         onDeviationsComputed={handleDeviationsComputed}
+        onShowPricing={() => setShowPricingPage(true)}
       />
 
       {/* Interior Panel */}
@@ -1901,6 +1904,24 @@ export const CADCanvas: React.FC = () => {
 
       {/* Support Widget */}
       <SupportWidget />
+
+      {/* Welcome Modal — first visit only */}
+      <WelcomeModal
+        isOpen={showWelcome}
+        onClose={() => {
+          localStorage.setItem('survai_visited', '1');
+          setShowWelcome(false);
+        }}
+        onStartTrial={() => {
+          localStorage.setItem('survai_visited', '1');
+          setShowWelcome(false);
+          setShowPricingPage(true);
+        }}
+        onDemo={() => {
+          localStorage.setItem('survai_visited', '1');
+          setShowWelcome(false);
+        }}
+      />
     </div>
   );
 };

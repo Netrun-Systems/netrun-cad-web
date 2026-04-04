@@ -53,8 +53,8 @@ const buildSearchIndex = (): Array<{ tab: HelpTab; text: string }> => {
   }
 
   // Static text — quick start
-  index.push({ tab: 'quickstart', text: 'quick start cad mode draw mode color mode text mode modes overview line rectangle circle dimension select' });
-  index.push({ tab: 'quickstart', text: 'save open project google drive how to first line walkthrough' });
+  index.push({ tab: 'quickstart', text: 'quick start cad mode draw mode color mode text mode modes overview line rectangle circle dimension select scan blueprint compare deviation route mep' });
+  index.push({ tab: 'quickstart', text: 'save open project google drive how to upload scan import blueprint export report construction workflow' });
 
   // Tools
   index.push({ tab: 'tools', text: 'cad tools line rectangle circle dimension select draw mode pen brush watercolor marker color mode text font' });
@@ -264,6 +264,24 @@ const KbdCell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 // ─── Quick Start Tab ──────────────────────────────────────────────────────────
 const QuickStartTab: React.FC<{ search: string }> = () => (
   <div>
+    <SectionHeading>Construction Workflow</SectionHeading>
+
+    <Step n={1}>
+      <strong className="text-gray-300">Upload a Scan</strong> — Tap the scan icon to upload a 3D scan from KIRI Engine (OBJ/PLY). Survai's ML detects electrical outlets, pipes, HVAC, and more.
+    </Step>
+    <Step n={2}>
+      <strong className="text-gray-300">Import Your Blueprint</strong> — Type <KbdCell>BP</KbdCell> in the command line or use the menu to upload a DXF/DWG blueprint. It appears as a locked reference layer.
+    </Step>
+    <Step n={3}>
+      <strong className="text-gray-300">Run Comparison</strong> — Hit Compare to find deviations between your plans and reality. Color-coded markers show what's different.
+    </Step>
+    <Step n={4}>
+      <strong className="text-gray-300">Export Report</strong> — Export the deviation report as DXF for AutoCAD, or PDF for your project files.
+    </Step>
+    <Step n={5}>
+      <strong className="text-gray-300">Draw Routes</strong> — Switch to Route mode (type <KbdCell>RT</KbdCell>) to plan MEP routes with material cost estimation.
+    </Step>
+
     <SectionHeading>4 Modes Overview</SectionHeading>
     <div className="space-y-2 mb-4">
       {[
@@ -288,12 +306,21 @@ const QuickStartTab: React.FC<{ search: string }> = () => (
       ))}
     </div>
 
-    <SectionHeading>Draw Your First Line</SectionHeading>
-    <Step n={1}>Press <KbdCell>1</KbdCell> to enter CAD Mode (or click the ruler icon at top).</Step>
-    <Step n={2}>Press <KbdCell>L</KbdCell> — the command line shows "LINE".</Step>
-    <Step n={3}>Click two points on the canvas. A measured line appears.</Step>
-    <Step n={4}>Press <KbdCell>Esc</KbdCell> to finish, or keep clicking to continue the line.</Step>
-    <Step n={5}>Press <KbdCell>Ctrl+Z</KbdCell> to undo any mistake.</Step>
+    <SectionHeading>Keyboard Shortcuts</SectionHeading>
+    <div className="space-y-1 mb-4">
+      {[
+        ['V / L / R / C / D', 'Select / Line / Rect / Circle / Dim'],
+        ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / Redo'],
+        ['Esc', 'Cancel current operation'],
+        ['F7 / G', 'Toggle grid'],
+        ['F8', 'Toggle ortho mode'],
+      ].map(([key, desc]) => (
+        <div key={key} className="flex justify-between text-xs">
+          <KbdCell>{key}</KbdCell>
+          <span className="text-gray-500">{desc}</span>
+        </div>
+      ))}
+    </div>
 
     <SectionHeading>How to Save / Open Projects</SectionHeading>
     <Para>Your drawing auto-saves locally every 5 seconds — no button needed.</Para>
@@ -302,10 +329,6 @@ const QuickStartTab: React.FC<{ search: string }> = () => (
       top toolbar. Sign in once and your projects save to Drive automatically.
     </Para>
     <Para>To open a saved project: click the folder icon in the ProjectBar and pick from the list.</Para>
-    <Para>
-      To share a plan: open it from Drive, then click <strong className="text-gray-300">Share</strong> —
-      a view-only link is copied to your clipboard.
-    </Para>
 
     <SectionHeading>Common Gestures (iPad)</SectionHeading>
     <div className="space-y-1">

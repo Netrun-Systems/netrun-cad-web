@@ -17,11 +17,13 @@ import type { BasemapState } from '../components/Basemap/BasemapRenderer';
 // ── Config ─────────────────────────────────────────────────────────────────────
 
 const GOOGLE_CLIENT_ID =
-  (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ||
-  'YOUR_CLIENT_ID.apps.googleusercontent.com';
+  (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || '';
 
 const GOOGLE_API_KEY =
   (import.meta.env.VITE_GOOGLE_API_KEY as string | undefined) || '';
+
+// Returns true if Drive credentials are configured (non-empty)
+export const isDriveConfigured = () => !!GOOGLE_CLIENT_ID && !!GOOGLE_API_KEY;
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
@@ -176,6 +178,9 @@ class GoogleDriveService {
 
   /** Sign in with Google and obtain Drive access. */
   async signIn(): Promise<void> {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_API_KEY) {
+      throw new Error('Google Drive is not configured. Set VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY.');
+    }
     await this.initGapi();
     await this.initTokenClient();
     await this.requestToken();
@@ -303,7 +308,7 @@ class GoogleDriveService {
    * Save a project to Drive. Creates a new file or updates an existing one.
    * Returns the file ID.
    */
-  async saveProject(project: NetrunCADProject, fileId?: string): Promise<string> {
+  async saveProject(project: NetrunCADProject, fileId?: string, pin = false): Promise<string> {
     if (!this.accessToken) throw new Error('Not signed in to Google Drive');
 
     const content = JSON.stringify(project, null, 2);
@@ -311,7 +316,7 @@ class GoogleDriveService {
     const folderId = await this.ensureFolder(project.client);
 
     if (fileId) {
-      // Update existing file (metadata only first, then content)
+      // Update existing file — Drive auto-creates a new revision
       await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?uploadType=media`, {
         method: 'PATCH',
         headers: {
@@ -320,6 +325,17 @@ class GoogleDriveService {
         },
         body: content,
       });
+
+      // Pin the new revision on manual saves so it's never auto-pruned
+      if (pin) {
+        try {
+          const revisions = await this.listRevisions(fileId);
+          if (revisions.length > 0) {
+            await this.pinRevision(fileId, revisions[0].id);
+          }
+        } catch { /* pinning is non-critical */ }
+      }
+
       return fileId;
     }
 
@@ -370,6 +386,351 @@ class GoogleDriveService {
    */
   async autoSave(project: NetrunCADProject, fileId: string): Promise<void> {
     await this.saveProject(project, fileId);
+  }
+
+  // ── Revision history (version control via Drive Revisions API) ─────────
+
+  /**
+   * List all revisions of a .ncad file.
+   * Each revision represents a saved state that can be restored.
+   */
+  async listRevisions(fileId: string): Promise<Array<{
+    id: string;
+    modifiedTime: string;
+    size: string;
+    keepForever: boolean;
+    lastModifyingUser?: { displayName: string; photoLink?: string };
+  }>> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+
+    const response = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/revisions?fields=revisions(id,modifiedTime,size,keepForever,lastModifyingUser)&pageSize=100`,
+      { headers: { Authorization: `Bearer ${this.accessToken}` } },
+    );
+    const data = await response.json();
+    return (data.revisions || []).reverse(); // newest first
+  }
+
+  /**
+   * Download and parse a specific revision of a .ncad file.
+   * Used for preview and restore.
+   */
+  async downloadRevision(fileId: string, revisionId: string): Promise<NetrunCADProject> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+
+    const response = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/revisions/${revisionId}?alt=media`,
+      { headers: { Authorization: `Bearer ${this.accessToken}` } },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to download revision: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Pin a revision so Google Drive never auto-prunes it.
+   * Useful for marking milestone saves (manual Ctrl+S).
+   */
+  async pinRevision(fileId: string, revisionId: string): Promise<void> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+
+    await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/revisions/${revisionId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ keepForever: true }),
+      },
+    );
+  }
+
+  /**
+   * Unpin a revision (allow Drive to auto-prune it).
+   */
+  async unpinRevision(fileId: string, revisionId: string): Promise<void> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+
+    await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}/revisions/${revisionId}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ keepForever: false }),
+      },
+    );
+  }
+
+  /**
+   * Restore a file to a specific revision by downloading the old content
+   * and saving it as a new revision (preserving history).
+   */
+  async restoreRevision(fileId: string, revisionId: string): Promise<NetrunCADProject> {
+    const project = await this.downloadRevision(fileId, revisionId);
+    // Save the old content as a new revision (so restore itself is in the history)
+    project.modified = new Date().toISOString();
+    await this.saveProject(project, fileId);
+    return project;
+  }
+
+  // ── Project folder structure ────────────────────────────────────────────
+
+  /**
+   * Ensure the full project folder structure exists:
+   *   Netrun CAD Projects / {client} /
+   *     ├── Materials/        ← photos, scans, reference docs
+   *     └── Client Notes      ← Google Doc for team notes
+   *
+   * Returns { clientFolderId, materialsFolderId, notesDocId, notesDocUrl }
+   */
+  async ensureProjectStructure(clientName?: string): Promise<{
+    clientFolderId: string;
+    materialsFolderId: string;
+    notesDocId: string;
+    notesDocUrl: string;
+  }> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+    const token = this.accessToken;
+    const clientFolderId = await this.ensureFolder(clientName);
+
+    // Find or create Materials subfolder
+    const matQuery = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+        `mimeType='application/vnd.google-apps.folder' and name='Materials' and '${clientFolderId}' in parents and trashed=false`
+      )}&fields=files(id)`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const matData = await matQuery.json();
+    let materialsFolderId: string;
+
+    if (matData.files?.length > 0) {
+      materialsFolderId = matData.files[0].id;
+    } else {
+      const create = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Materials',
+          mimeType: 'application/vnd.google-apps.folder',
+          parents: [clientFolderId],
+        }),
+      });
+      const folder = await create.json();
+      materialsFolderId = folder.id;
+    }
+
+    // Find or create Client Notes Google Doc
+    const displayName = clientName || 'Project';
+    const notesDocName = `${displayName} — Notes`;
+    const notesQuery = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+        `mimeType='application/vnd.google-apps.document' and name='${notesDocName}' and '${clientFolderId}' in parents and trashed=false`
+      )}&fields=files(id,webViewLink)`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    const notesData = await notesQuery.json();
+    let notesDocId: string;
+    let notesDocUrl: string;
+
+    if (notesData.files?.length > 0) {
+      notesDocId = notesData.files[0].id;
+      notesDocUrl = notesData.files[0].webViewLink;
+    } else {
+      // Create a Google Doc with starter template
+      const createDoc = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: notesDocName,
+          mimeType: 'application/vnd.google-apps.document',
+          parents: [clientFolderId],
+        }),
+      });
+      const doc = await createDoc.json();
+      notesDocId = doc.id;
+      notesDocUrl = doc.webViewLink;
+    }
+
+    return { clientFolderId, materialsFolderId, notesDocId, notesDocUrl };
+  }
+
+  /**
+   * Upload a file (photo, scan, PDF, etc.) to the Materials subfolder.
+   * Returns { id, name, webViewLink }.
+   */
+  async uploadMaterial(
+    file: File,
+    clientName?: string,
+  ): Promise<{ id: string; name: string; webViewLink: string }> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+
+    const { materialsFolderId } = await this.ensureProjectStructure(clientName);
+
+    const boundary = 'material_' + Date.now();
+    const metadata = JSON.stringify({
+      name: file.name,
+      parents: [materialsFolderId],
+    });
+
+    const metaPart = [
+      `--${boundary}`,
+      'Content-Type: application/json; charset=UTF-8',
+      '',
+      metadata,
+      `--${boundary}`,
+      `Content-Type: ${file.type || 'application/octet-stream'}`,
+      '',
+    ].join('\r\n');
+
+    const endPart = `\r\n--${boundary}--`;
+    const body = new Blob([metaPart, file, endPart]);
+
+    const response = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+      },
+    );
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(`Material upload failed: ${err.error?.message ?? response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * List files in the Materials subfolder.
+   */
+  async listMaterials(clientName?: string): Promise<Array<{
+    id: string;
+    name: string;
+    mimeType: string;
+    size: string;
+    modifiedTime: string;
+    webViewLink: string;
+    thumbnailLink?: string;
+  }>> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+
+    const { materialsFolderId } = await this.ensureProjectStructure(clientName);
+
+    const response = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+        `'${materialsFolderId}' in parents and trashed=false`
+      )}&fields=files(id,name,mimeType,size,modifiedTime,webViewLink,thumbnailLink)&orderBy=modifiedTime desc`,
+      { headers: { Authorization: `Bearer ${this.accessToken}` } },
+    );
+    const data = await response.json();
+    return data.files || [];
+  }
+
+  /**
+   * Delete a material file from Drive.
+   */
+  async deleteMaterial(fileId: string): Promise<void> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+    await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${this.accessToken}` },
+    });
+  }
+
+  // ── Companion file exports (DXF + PNG alongside .ncad) ──────────────────
+
+  /**
+   * Upload or update a companion file (DXF or PNG) in the same Drive folder.
+   * Uses name-based matching to find existing companion files for updates.
+   */
+  async saveCompanionFile(
+    content: Blob | string,
+    filename: string,
+    mimeType: string,
+    clientName?: string,
+  ): Promise<string> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+
+    const folderId = await this.ensureFolder(clientName);
+    const isString = typeof content === 'string';
+    const blob = isString ? new Blob([content], { type: mimeType }) : content;
+
+    // Check if companion file already exists in the folder
+    const searchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+        `name='${filename}' and '${folderId}' in parents and trashed=false`
+      )}&fields=files(id)&spaces=drive`,
+      { headers: { Authorization: `Bearer ${this.accessToken}` } },
+    );
+    const searchData = await searchRes.json();
+    const existingId = searchData.files?.[0]?.id;
+
+    if (existingId) {
+      // Update existing companion file
+      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+          'Content-Type': mimeType,
+        },
+        body: blob,
+      });
+      return existingId;
+    }
+
+    // Create new companion file
+    const boundary = 'companion_' + Date.now();
+    const metadata = JSON.stringify({
+      name: filename,
+      mimeType,
+      parents: [folderId],
+    });
+
+    const metaPart = [
+      `--${boundary}`,
+      'Content-Type: application/json; charset=UTF-8',
+      '',
+      metadata,
+      `--${boundary}`,
+      `Content-Type: ${mimeType}`,
+      '',
+    ].join('\r\n');
+
+    const endPart = `\r\n--${boundary}--`;
+    const body = new Blob([metaPart, blob, endPart]);
+
+    const response = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+      }
+    );
+
+    if (!response.ok) {
+      const err = await response.json();
+      throw new Error(`Companion upload failed: ${err.error?.message ?? response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.id as string;
   }
 
   // ── Open ───────────────────────────────────────────────────────────────────
