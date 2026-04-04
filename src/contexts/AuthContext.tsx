@@ -13,6 +13,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  loginWithGoogle: (credential: string) => Promise<void>;
   logout: () => Promise<void>;
   register: (email: string, password: string, username: string) => Promise<void>;
 }
@@ -47,9 +48,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refreshUser();
   };
 
+  const loginWithGoogle = async (credential: string) => {
+    // Exchange Google ID token for Survai JWT
+    const resp = await api.exchangeGoogleToken(credential);
+    localStorage.setItem('survai_access_token', resp.access_token);
+    localStorage.setItem('survai_refresh_token', resp.refresh_token);
+    await refreshUser();
+  };
+
   const register = async (email: string, password: string, username: string) => {
     await api.register(email, password, username);
-    // Auto-login after registration
     await login(email, password);
   };
 
@@ -63,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isAuthenticated: !!user,
     isLoading,
     login,
+    loginWithGoogle,
     logout,
     register,
   };

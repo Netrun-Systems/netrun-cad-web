@@ -177,6 +177,17 @@ class ApiClient {
     return response.data;
   }
 
+  async exchangeGoogleToken(credential: string): Promise<AuthTokens> {
+    const response = await this.client.post<AuthTokens>(
+      '/api/v1/auth/oauth/google/token-exchange',
+      { credential },
+    );
+    const tokens = response.data;
+    localStorage.setItem('survai_access_token', tokens.access_token);
+    localStorage.setItem('survai_refresh_token', tokens.refresh_token);
+    return tokens;
+  }
+
   // ── Scans ─────────────────────────────────────────────
 
   async uploadScan(file: File, onProgress?: (progress: number) => void): Promise<{ scan_id: string }> {
