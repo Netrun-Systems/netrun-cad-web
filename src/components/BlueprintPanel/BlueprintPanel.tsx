@@ -12,6 +12,7 @@ import { api } from '../../services/api';
 import type { BlueprintUploadResponse } from '../../services/blueprints';
 import type { DeviationReport } from '../../services/blueprints';
 import { useAuth } from '../../contexts/AuthContext';
+import { generateDeviationPDF } from '../../engine/deviation-report-pdf';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -395,14 +396,49 @@ export default function BlueprintPanel({
           </div>
         )}
 
-        {/* Export button */}
+        {/* Export buttons */}
         {blueprintId && deviationReport && (
-          <div className="border-t border-gray-700 pt-4">
+          <div className="border-t border-gray-700 pt-4 space-y-2">
             <button
               onClick={handleExport}
               className="w-full py-2 rounded text-sm font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
             >
               Export Deviations DXF
+            </button>
+            <button
+              onClick={() => {
+                if (!deviationReport) return;
+                generateDeviationPDF({
+                  projectName: activeScanId ?? 'Untitled Project',
+                  date: new Date().toLocaleDateString(),
+                  scanInfo: activeScanId ?? undefined,
+                  blueprintInfo: blueprintId ?? undefined,
+                  toleranceMm: toleranceMm,
+                  deviations: deviationReport.deviations.map((d) => ({
+                    id: d.id,
+                    deviation_type: d.deviation_type as 'MATCH' | 'POSITION_DEVIATION' | 'TYPE_MISMATCH' | 'MISSING_IN_SCAN' | 'EXTRA_IN_SCAN',
+                    severity: d.severity as 'OK' | 'WARNING' | 'CRITICAL',
+                    distance_mm: d.distance_mm,
+                    planned_position: null,
+                    actual_position: null,
+                    planned_type: d.planned_type ?? null,
+                    actual_type: d.actual_type ?? null,
+                    message: d.message,
+                  })),
+                  summary: {
+                    total: deviationReport.total_elements,
+                    matches: deviationReport.matches,
+                    position: deviationReport.position_deviations,
+                    typeMismatch: deviationReport.type_mismatches,
+                    missing: deviationReport.missing_in_scan,
+                    extra: deviationReport.extra_in_scan,
+                    passRate: deviationReport.pass_rate,
+                  },
+                });
+              }}
+              className="w-full py-2 rounded text-sm font-medium bg-indigo-700 hover:bg-indigo-600 text-white transition-colors"
+            >
+              Export PDF Report
             </button>
           </div>
         )}

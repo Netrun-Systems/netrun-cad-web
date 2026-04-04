@@ -75,6 +75,7 @@ import SplitView from '../SplitView/SplitView';
 import ModelViewer3D from '../Viewport3D/ModelViewer3D';
 import BlueprintPanel from '../BlueprintPanel/BlueprintPanel';
 import { WelcomeModal } from '../Welcome/WelcomeModal';
+import type { DemoProject } from '../../data/demo-project';
 
 let plantPlaceId = 1;
 
@@ -1920,6 +1921,17 @@ export const CADCanvas: React.FC = () => {
         onDemo={() => {
           localStorage.setItem('survai_visited', '1');
           setShowWelcome(false);
+        }}
+        onLoadDemo={(project: DemoProject) => {
+          const allElements = [
+            ...project.blueprintElements,
+            ...project.scanDetections,
+            ...project.deviationElements,
+          ];
+          setElements(allElements);
+          setScan3DDetections(project.detection3D);
+          setSplitMode('split');
+          setActiveScanId('demo-scan');
         }}
       />
     </div>

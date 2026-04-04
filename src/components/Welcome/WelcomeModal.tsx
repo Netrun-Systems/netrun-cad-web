@@ -4,12 +4,14 @@
  */
 
 import React from 'react';
+import type { DemoProject } from '../../data/demo-project';
 
 interface WelcomeModalProps {
   isOpen: boolean;
   onClose: () => void;
   onStartTrial: () => void;
   onDemo: () => void;
+  onLoadDemo?: (project: DemoProject) => void;
 }
 
 const FEATURES = [
@@ -47,6 +49,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   onClose,
   onStartTrial,
   onDemo,
+  onLoadDemo,
 }) => {
   if (!isOpen) return null;
 
@@ -109,7 +112,14 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
               Start Free Trial
             </button>
             <button
-              onClick={onDemo}
+              onClick={() => {
+                if (onLoadDemo) {
+                  import('../../data/demo-project').then(({ loadDemoProject }) => {
+                    onLoadDemo(loadDemoProject());
+                  });
+                }
+                onDemo();
+              }}
               className="w-full py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-lg transition-colors border border-gray-600"
             >
               Try Demo
