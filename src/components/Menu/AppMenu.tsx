@@ -76,6 +76,9 @@ export interface AppMenuProps {
     needsManualInstall: boolean;
   };
 
+  // Dashboard
+  onShowDashboard: () => void;
+
   // UI panel visibility
   topBarHidden: boolean;
   onToggleTopBar: () => void;
@@ -182,6 +185,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   sidePanelCollapsed,
   onToggleSidePanel,
   installPrompt,
+  onShowDashboard,
   onShowPricing,
   onShowAccount,
 }) => {
@@ -244,6 +248,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         <div className="flex-1 px-3 py-4">
           <MenuSection title="File">
             <MenuItem label="New Project" icon="📄" shortcut="Ctrl+N" onClick={action(onNewProject)} />
+            <MenuItem label="My Projects" icon="📊" onClick={action(onShowDashboard)} />
             <MenuItem label="Open from Drive" icon="📂" shortcut="Ctrl+O" onClick={action(onOpenProject)} />
             <MenuItem label="Save" icon="💾" shortcut="Ctrl+S" onClick={action(onSave)} />
             <MenuItem label="Save As..." icon="📋" shortcut="Ctrl+Shift+S" onClick={action(onSaveAs)} />

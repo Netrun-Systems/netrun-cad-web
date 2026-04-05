@@ -73,11 +73,16 @@ import { RevisionHistoryPanel } from '../ProjectManager/RevisionHistoryPanel';
 import type { Detection3D } from '../Viewport3D/ModelViewer3D';
 import SplitView from '../SplitView/SplitView';
 import ModelViewer3D from '../Viewport3D/ModelViewer3D';
+import type { PointCloudData } from '../../engine/pointcloud-loader';
 import BlueprintPanel from '../BlueprintPanel/BlueprintPanel';
+import ProjectDashboard from '../Dashboard/ProjectDashboard';
+import type { ProjectInfo } from '../Dashboard/ProjectDashboard';
 import { WelcomeModal } from '../Welcome/WelcomeModal';
 import type { DemoProject } from '../../data/demo-project';
 import { linkAnnotationToDeviation, type LinkedAnnotation } from '../../engine/annotation-linker';
 import { RouteTutorialOverlay } from '../RouteEditor/RouteTutorialOverlay';
+import { OfflineIndicator } from '../OfflineIndicator/OfflineIndicator';
+import { cacheProject } from '../../services/offline-storage';
 
 let plantPlaceId = 1;
 
@@ -141,9 +146,12 @@ export const CADCanvas: React.FC = () => {
   const [show3DView, setShow3DView] = useState(false);
   const [splitMode, setSplitMode] = useState<'cad-only' | 'split' | '3d-only'>('cad-only');
   const [scan3DDetections, setScan3DDetections] = useState<Detection3D[]>([]);
+  const [scanPointCloud, setScanPointCloud] = useState<PointCloudData | undefined>(undefined);
+  const [scanMeshUrl, setScanMeshUrl] = useState<string | undefined>(undefined);
   const [activeScanId, setActiveScanId] = useState<string | null>(null);
   const [showBlueprintPanel, setShowBlueprintPanel] = useState(false);
   const [activeBlueprintId, setActiveBlueprintId] = useState<string | null>(null);
+  const [showDashboard, setShowDashboard] = useState(false);
 
   // Layer & grid hooks
   const {
@@ -317,9 +325,16 @@ export const CADCanvas: React.FC = () => {
     setElements(prev => [...prev.filter(e => e.layerId !== 'deviations'), ...devElements]);
   }, []);
 
-  const handleScan3DData = useCallback((scanId: string, detections: Detection3D[]) => {
+  const handleScan3DData = useCallback((
+    scanId: string,
+    detections: Detection3D[],
+    pointCloud?: PointCloudData,
+    meshUrl?: string,
+  ) => {
     setActiveScanId(scanId);
     setScan3DDetections(detections);
+    setScanPointCloud(pointCloud);
+    setScanMeshUrl(meshUrl);
   }, []);
 
   // Undo helper
@@ -526,6 +541,19 @@ export const CADCanvas: React.FC = () => {
         case 'help':
           setShowHelp(true);
           setCmdHistory((h) => [...h, 'Help panel opened  — press Esc or ? to close']);
+          break;
+
+        // Survai panel actions
+        case 'openBlueprintPanel':
+          setShowBlueprintPanel(true);
+          break;
+        case 'toggle3DView':
+          setShow3DView((s) => !s);
+          break;
+
+        // Dashboard
+        case 'panel:dashboard':
+          setShowDashboard(true);
           break;
 
         default:
@@ -1379,11 +1407,14 @@ export const CADCanvas: React.FC = () => {
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap, pendingInput, cadTool, cursorX, cursorY, selectedElementId, annotationLinks]);
 
-  // ── localStorage persistence ───────────────────────────────────────────────
+  // ── localStorage + IndexedDB persistence ────────────────────────────────────
   useEffect(() => {
     const timer = setInterval(() => {
       try {
-        localStorage.setItem('netrun-cad-state', JSON.stringify({ elements, layers, view, grid }));
+        const state = { elements, layers, view, grid };
+        localStorage.setItem('netrun-cad-state', JSON.stringify(state));
+        // Also persist to IndexedDB for offline durability
+        cacheProject('current', state).catch(() => { /* IndexedDB unavailable */ });
       } catch { /* localStorage full */ }
     }, 5000);
     return () => clearInterval(timer);
@@ -1506,6 +1537,8 @@ export const CADCanvas: React.FC = () => {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-cad-bg">
+      {/* Offline connectivity banner */}
+      <OfflineIndicator />
       {/* Top Bar (hideable — double-tap top edge to restore) */}
       {!topBarHidden ? (
         <TopBar
@@ -1649,6 +1682,7 @@ export const CADCanvas: React.FC = () => {
         sidePanelCollapsed={sidePanelCollapsed}
         onToggleSidePanel={() => setSidePanelCollapsed(c => !c)}
         installPrompt={installPrompt}
+        onShowDashboard={() => setShowDashboard(true)}
         onShowPricing={() => setShowPricingPage(true)}
         onShowAccount={() => setShowAccountPanel(true)}
       />
@@ -1749,6 +1783,30 @@ export const CADCanvas: React.FC = () => {
           onClose={() => setShowSurvaiPanel(false)}
         />
       )}
+
+      {/* Project Dashboard */}
+      <ProjectDashboard
+        isOpen={showDashboard}
+        onClose={() => setShowDashboard(false)}
+        onOpenProject={(project: ProjectInfo) => {
+          // Load project data from localStorage
+          const key = `survai_project_${project.id}`;
+          try {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+              const data = JSON.parse(raw);
+              if (data.elements) setElements(data.elements);
+            }
+          } catch {
+            // Failed to load — start fresh
+          }
+          setShowDashboard(false);
+        }}
+        onNewProject={() => {
+          handleNewProject({ name: 'Untitled Project', client: '', address: '', template: 'blank' });
+          setProjectNameState('Untitled Project');
+        }}
+      />
 
       {/* Blueprint Comparison panel */}
       <BlueprintPanel

@@ -1,5 +1,5 @@
-import { useRef, useState, Suspense } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { useRef, useState, useMemo, Suspense } from 'react';
+import { Canvas, useFrame, useLoader } from '@react-three/fiber';
 import {
   OrbitControls,
   Grid,
@@ -7,7 +7,10 @@ import {
   Html,
 } from '@react-three/drei';
 import * as THREE from 'three';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Loader2 } from 'lucide-react';
+import type { PointCloudData } from '../../engine/pointcloud-loader';
 
 export interface Detection3D {
   id: string;
@@ -21,6 +24,10 @@ export interface ModelViewer3DProps {
   detections: Detection3D[];
   selectedDetectionId: string | null;
   onDetectionSelect: (id: string) => void;
+  pointCloudData?: PointCloudData;
+  meshUrl?: string; // URL to OBJ or GLB file
+  showPointCloud?: boolean;
+  pointSize?: number; // default 0.01
 }
 
 /** Color palette keyed by feature_type prefix */
@@ -37,6 +44,102 @@ function colorForType(featureType: string): string {
     featureType.toLowerCase().startsWith(k),
   );
   return key ? typeColors[key] : '#9ca3af';
+}
+
+/* ------------------------------------------------------------------ */
+/*  PointCloudRenderer                                                 */
+/* ------------------------------------------------------------------ */
+
+function PointCloudRenderer({
+  data,
+  pointSize = 0.01,
+}: {
+  data: PointCloudData;
+  pointSize?: number;
+}) {
+  const ref = useRef<THREE.Points>(null);
+
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(data.positions, 3));
+    if (data.colors) {
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(data.colors, 3));
+    }
+    geo.computeBoundingSphere();
+    return geo;
+  }, [data]);
+
+  return (
+    <points ref={ref} geometry={geometry}>
+      <pointsMaterial
+        size={pointSize}
+        vertexColors={!!data.colors}
+        color={data.colors ? undefined : '#88ccff'}
+        sizeAttenuation
+        transparent
+        opacity={0.85}
+      />
+    </points>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  MeshRenderer — loads OBJ or GLB from a URL                        */
+/* ------------------------------------------------------------------ */
+
+function OBJMeshRenderer({ url }: { url: string }) {
+  const obj = useLoader(OBJLoader, url);
+
+  const cloned = useMemo(() => {
+    const group = obj.clone();
+    group.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        (child as THREE.Mesh).material = new THREE.MeshStandardMaterial({
+          color: '#8899aa',
+          transparent: true,
+          opacity: 0.6,
+          side: THREE.DoubleSide,
+          roughness: 0.7,
+          metalness: 0.1,
+        });
+      }
+    });
+    return group;
+  }, [obj]);
+
+  return <primitive object={cloned} />;
+}
+
+function GLBMeshRenderer({ url }: { url: string }) {
+  const gltf = useLoader(GLTFLoader, url);
+
+  const cloned = useMemo(() => {
+    const scene = gltf.scene.clone();
+    scene.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        (child as THREE.Mesh).material = new THREE.MeshStandardMaterial({
+          color: '#8899aa',
+          transparent: true,
+          opacity: 0.6,
+          side: THREE.DoubleSide,
+          roughness: 0.7,
+          metalness: 0.1,
+        });
+      }
+    });
+    return scene;
+  }, [gltf]);
+
+  return <primitive object={cloned} />;
+}
+
+function MeshRenderer({ url }: { url: string }) {
+  const ext = url.split('.').pop()?.toLowerCase() ?? '';
+  if (ext === 'glb' || ext === 'gltf') {
+    return <GLBMeshRenderer url={url} />;
+  }
+  // Default to OBJ
+  return <OBJMeshRenderer url={url} />;
 }
 
 /* ------------------------------------------------------------------ */
@@ -133,6 +236,105 @@ function DetectionMarker({ detection, isSelected, onClick }: DetectionMarkerProp
 }
 
 /* ------------------------------------------------------------------ */
+/*  ViewportControls — toggle overlays at bottom of 3D viewport        */
+/* ------------------------------------------------------------------ */
+
+interface ViewportControlsProps {
+  showPoints: boolean;
+  setShowPoints: (v: boolean) => void;
+  showMesh: boolean;
+  setShowMesh: (v: boolean) => void;
+  showDetections: boolean;
+  setShowDetections: (v: boolean) => void;
+  pointSize: number;
+  setPointSize: (v: number) => void;
+  hasPointCloud: boolean;
+  hasMesh: boolean;
+}
+
+function ViewportControls({
+  showPoints,
+  setShowPoints,
+  showMesh,
+  setShowMesh,
+  showDetections,
+  setShowDetections,
+  pointSize,
+  setPointSize,
+  hasPointCloud,
+  hasMesh,
+}: ViewportControlsProps) {
+  return (
+    <div className="absolute bottom-3 left-3 right-3 flex items-center gap-3 bg-gray-900/80 backdrop-blur-sm rounded-lg px-3 py-2 text-xs pointer-events-auto">
+      {/* Points toggle */}
+      <label className={`flex items-center gap-1.5 cursor-pointer select-none ${!hasPointCloud ? 'opacity-40 pointer-events-none' : ''}`}>
+        <input
+          type="checkbox"
+          checked={showPoints}
+          onChange={(e) => setShowPoints(e.target.checked)}
+          className="accent-cyan-400 w-3 h-3"
+        />
+        <span className="text-gray-300">Points</span>
+      </label>
+
+      {/* Mesh toggle */}
+      <label className={`flex items-center gap-1.5 cursor-pointer select-none ${!hasMesh ? 'opacity-40 pointer-events-none' : ''}`}>
+        <input
+          type="checkbox"
+          checked={showMesh}
+          onChange={(e) => setShowMesh(e.target.checked)}
+          className="accent-cyan-400 w-3 h-3"
+        />
+        <span className="text-gray-300">Mesh</span>
+      </label>
+
+      {/* Detections toggle */}
+      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={showDetections}
+          onChange={(e) => setShowDetections(e.target.checked)}
+          className="accent-cyan-400 w-3 h-3"
+        />
+        <span className="text-gray-300">Detections</span>
+      </label>
+
+      {/* Divider */}
+      {hasPointCloud && <div className="w-px h-4 bg-gray-600" />}
+
+      {/* Point size slider */}
+      {hasPointCloud && (
+        <label className="flex items-center gap-1.5 select-none">
+          <span className="text-gray-400">Size</span>
+          <input
+            type="range"
+            min={0.005}
+            max={0.05}
+            step={0.001}
+            value={pointSize}
+            onChange={(e) => setPointSize(parseFloat(e.target.value))}
+            className="w-20 h-1 accent-cyan-400"
+          />
+          <span className="text-gray-500 w-8 text-right tabular-nums">
+            {pointSize.toFixed(3)}
+          </span>
+        </label>
+      )}
+
+      {/* Point count badge */}
+      {hasPointCloud && showPoints && (
+        <>
+          <div className="w-px h-4 bg-gray-600" />
+          <span className="text-gray-500 tabular-nums">
+            {hasPointCloud ? 'pts loaded' : ''}
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Scene                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -140,9 +342,25 @@ interface SceneProps {
   detections: Detection3D[];
   selectedDetectionId: string | null;
   onDetectionSelect: (id: string) => void;
+  pointCloudData?: PointCloudData;
+  meshUrl?: string;
+  showPoints: boolean;
+  showMesh: boolean;
+  showDetections: boolean;
+  pointSize: number;
 }
 
-function Scene({ detections, selectedDetectionId, onDetectionSelect }: SceneProps) {
+function Scene({
+  detections,
+  selectedDetectionId,
+  onDetectionSelect,
+  pointCloudData,
+  meshUrl,
+  showPoints,
+  showMesh,
+  showDetections,
+  pointSize,
+}: SceneProps) {
   const bounds = detections.reduce(
     (acc, d) => ({
       minX: Math.min(acc.minX, d.coordinates.x),
@@ -169,7 +387,7 @@ function Scene({ detections, selectedDetectionId, onDetectionSelect }: SceneProp
         enableDamping
         dampingFactor={0.05}
         minDistance={2}
-        maxDistance={20}
+        maxDistance={50}
       />
 
       {/* Lighting */}
@@ -202,15 +420,28 @@ function Scene({ detections, selectedDetectionId, onDetectionSelect }: SceneProp
         <meshBasicMaterial />
       </mesh>
 
+      {/* Point cloud */}
+      {showPoints && pointCloudData && pointCloudData.count > 0 && (
+        <PointCloudRenderer data={pointCloudData} pointSize={pointSize} />
+      )}
+
+      {/* Mesh model */}
+      {showMesh && meshUrl && (
+        <Suspense fallback={null}>
+          <MeshRenderer url={meshUrl} />
+        </Suspense>
+      )}
+
       {/* Detection markers */}
-      {detections.map((detection) => (
-        <DetectionMarker
-          key={detection.id}
-          detection={detection}
-          isSelected={selectedDetectionId === detection.id}
-          onClick={() => onDetectionSelect(detection.id)}
-        />
-      ))}
+      {showDetections &&
+        detections.map((detection) => (
+          <DetectionMarker
+            key={detection.id}
+            detection={detection}
+            isSelected={selectedDetectionId === detection.id}
+            onClick={() => onDetectionSelect(detection.id)}
+          />
+        ))}
     </>
   );
 }
@@ -238,9 +469,21 @@ export default function ModelViewer3D({
   detections,
   selectedDetectionId,
   onDetectionSelect,
+  pointCloudData,
+  meshUrl,
+  showPointCloud: showPointCloudProp,
+  pointSize: pointSizeProp = 0.01,
 }: ModelViewer3DProps) {
+  const [showPoints, setShowPoints] = useState(showPointCloudProp ?? true);
+  const [showMesh, setShowMesh] = useState(true);
+  const [showDetections, setShowDetections] = useState(true);
+  const [pointSize, setPointSize] = useState(pointSizeProp);
+
+  const hasPointCloud = !!(pointCloudData && pointCloudData.count > 0);
+  const hasMesh = !!meshUrl;
+
   return (
-    <div className="w-full h-full min-h-[400px] rounded-lg overflow-hidden">
+    <div className="relative w-full h-full min-h-[400px] rounded-lg overflow-hidden">
       <Canvas
         shadows
         gl={{ antialias: true, alpha: false }}
@@ -251,9 +494,29 @@ export default function ModelViewer3D({
             detections={detections}
             selectedDetectionId={selectedDetectionId}
             onDetectionSelect={onDetectionSelect}
+            pointCloudData={pointCloudData}
+            meshUrl={meshUrl}
+            showPoints={showPoints}
+            showMesh={showMesh}
+            showDetections={showDetections}
+            pointSize={pointSize}
           />
         </Suspense>
       </Canvas>
+
+      {/* Viewport toggle controls */}
+      <ViewportControls
+        showPoints={showPoints}
+        setShowPoints={setShowPoints}
+        showMesh={showMesh}
+        setShowMesh={setShowMesh}
+        showDetections={showDetections}
+        setShowDetections={setShowDetections}
+        pointSize={pointSize}
+        setPointSize={setPointSize}
+        hasPointCloud={hasPointCloud}
+        hasMesh={hasMesh}
+      />
     </div>
   );
 }

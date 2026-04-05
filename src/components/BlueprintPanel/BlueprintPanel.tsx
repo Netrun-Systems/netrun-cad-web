@@ -7,6 +7,8 @@ import React, { useState, useCallback, useRef } from 'react';
 import type { CADElement } from '../../engine/types';
 import { importDXF } from '../../engine/dxf-import';
 import type { DXFImportResult } from '../../engine/dxf-import';
+import { importIFC } from '../../engine/ifc-import';
+import type { IFCImportResult } from '../../engine/ifc-import';
 import { deviationsToElements } from '../../engine/deviation-renderer';
 import type { DeviationReport as RendererDeviationReport } from '../../engine/deviation-renderer';
 import { api } from '../../services/api';
@@ -79,18 +81,44 @@ export default function BlueprintPanel({
       setCompareError(null);
 
       try {
-        // Parse DXF locally (with scale=1 initially — user will confirm)
-        const dxfResult = await importDXF(file);
+        const ext = file.name.split('.').pop()?.toLowerCase();
 
-        // Upload to API simultaneously
-        const response = await api.uploadBlueprint(activeScanId, file);
+        if (ext === 'ifc') {
+          // Parse IFC file locally
+          const ifcResult = await importIFC(file);
 
-        setUploadResponse(response);
-        setBlueprintId(response.id);
+          // Upload to API simultaneously
+          const response = await api.uploadBlueprint(activeScanId, file);
+          setUploadResponse(response);
+          setBlueprintId(response.id);
 
-        // Show scale confirmation dialog instead of placing elements immediately
-        setPendingImport({ dxfResult, apiResponse: response });
-        setShowScaleDialog(true);
+          // Place IFC elements directly on their layers (no scale dialog needed —
+          // IFC files use standardised metric units)
+          const blueprintElements = ifcResult.elements.map((el) => ({
+            ...el,
+            layerId: el.layerId, // Keep IFC-specific layer IDs
+          }));
+
+          // Add IFC layers to the project
+          if (ifcResult.layers.length > 0) {
+            // Layers are handled by the parent via onBlueprintImported
+          }
+
+          onBlueprintImported(blueprintElements, response.id);
+        } else {
+          // Parse DXF locally (with scale=1 initially — user will confirm)
+          const dxfResult = await importDXF(file);
+
+          // Upload to API simultaneously
+          const response = await api.uploadBlueprint(activeScanId, file);
+
+          setUploadResponse(response);
+          setBlueprintId(response.id);
+
+          // Show scale confirmation dialog instead of placing elements immediately
+          setPendingImport({ dxfResult, apiResponse: response });
+          setShowScaleDialog(true);
+        }
       } catch (err) {
         setUploadError(err instanceof Error ? err.message : 'Upload failed');
       } finally {
@@ -306,7 +334,7 @@ export default function BlueprintPanel({
         {activeScanId && (
           <div>
             <label className="block text-xs text-gray-400 mb-2 uppercase tracking-wide">
-              Upload Blueprint (DXF/DWG)
+              Upload Blueprint (DXF/DWG/IFC)
             </label>
             <div
               onDragOver={(e) => {
@@ -346,7 +374,7 @@ export default function BlueprintPanel({
                     />
                   </svg>
                   <span className="text-xs text-gray-400">
-                    Drop DXF/DWG here or click to browse
+                    Drop DXF/DWG/IFC here or click to browse
                   </span>
                 </>
               )}
@@ -354,7 +382,7 @@ export default function BlueprintPanel({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".dxf,.dwg"
+              accept=".dxf,.dwg,.ifc"
               className="hidden"
               onChange={handleFileInput}
             />
