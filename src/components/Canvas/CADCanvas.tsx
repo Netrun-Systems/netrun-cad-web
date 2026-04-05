@@ -76,6 +76,8 @@ import ModelViewer3D from '../Viewport3D/ModelViewer3D';
 import BlueprintPanel from '../BlueprintPanel/BlueprintPanel';
 import { WelcomeModal } from '../Welcome/WelcomeModal';
 import type { DemoProject } from '../../data/demo-project';
+import { linkAnnotationToDeviation, type LinkedAnnotation } from '../../engine/annotation-linker';
+import { RouteTutorialOverlay } from '../RouteEditor/RouteTutorialOverlay';
 
 let plantPlaceId = 1;
 
@@ -126,6 +128,9 @@ export const CADCanvas: React.FC = () => {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const dragStartRef = useRef<Point | null>(null);
   const dragElementStartRef = useRef<Point | null>(null);
+
+  // Annotation-to-deviation links (Apple Pencil annotations near deviation markers)
+  const [annotationLinks, setAnnotationLinks] = useState<LinkedAnnotation[]>([]);
 
   // Scan-GIS alignment
   const [showAlignmentEditor, setShowAlignmentEditor] = useState(false);
@@ -243,6 +248,32 @@ export const CADCanvas: React.FC = () => {
   const [showPricingPage, setShowPricingPage] = useState(false);
   const [showAccountPanel, setShowAccountPanel] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('survai_visited'));
+  const [showRouteTutorial, setShowRouteTutorial] = useState(false);
+
+  // ── Save recent project metadata to localStorage (debounced) ───────────────
+  const recentProjectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (elements.length === 0) return;
+    if (recentProjectTimerRef.current) clearTimeout(recentProjectTimerRef.current);
+    recentProjectTimerRef.current = setTimeout(() => {
+      try {
+        const entry = {
+          name: projectName || 'Untitled Project',
+          date: new Date().toISOString(),
+          elementCount: elements.length,
+        };
+        const raw = localStorage.getItem('survai_recent_projects');
+        let list: { name: string; date: string; elementCount: number }[] = [];
+        try { list = raw ? JSON.parse(raw) : []; } catch { list = []; }
+        // Upsert: remove existing entry with same name, prepend new one, cap at 3
+        list = [entry, ...list.filter((p) => p.name !== entry.name)].slice(0, 3);
+        localStorage.setItem('survai_recent_projects', JSON.stringify(list));
+      } catch { /* localStorage full or unavailable — ignore */ }
+    }, 2000);
+    return () => {
+      if (recentProjectTimerRef.current) clearTimeout(recentProjectTimerRef.current);
+    };
+  }, [elements.length, projectName]);
 
   const handleBasemapChange = useCallback((updates: Partial<BasemapState>) => {
     setBasemap((prev) => ({ ...prev, ...updates }));
@@ -264,6 +295,14 @@ export const CADCanvas: React.FC = () => {
       const next = [...elements, el];
       setElements(next);
       setHistoryState((h) => pushState(h, next));
+
+      // Auto-link freehand strokes to nearby deviation markers
+      if (el.type === 'freehand') {
+        const link = linkAnnotationToDeviation(el, next);
+        if (link) {
+          setAnnotationLinks((prev) => [...prev, link]);
+        }
+      }
     },
     [elements]
   );
@@ -388,6 +427,13 @@ export const CADCanvas: React.FC = () => {
         case 'mode:text':   setMode('text');  break;
         case 'mode:draw':   setMode('draw');  break;
         case 'mode:color':  setMode('color'); break;
+        case 'setRouteMode':
+        case 'mode:route':
+          setMode('route');
+          if (!localStorage.getItem('survai_route_tutorial_seen')) {
+            setShowRouteTutorial(true);
+          }
+          break;
         case 'pan':         setMode('cad');   setCadTool('select'); break;
 
         // Edit
@@ -1290,6 +1336,36 @@ export const CADCanvas: React.FC = () => {
             ]) {
               ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2);
             }
+
+            // Cross-highlight linked deviation when a linked stroke is selected
+            const linkedDev = annotationLinks.find((l) => l.strokeId === selectedElementId);
+            if (linkedDev) {
+              const devEl = elements.find((e) => e.id === linkedDev.deviationId);
+              if (devEl) {
+                const devBb = getBoundingBox(devEl);
+                const devPad = 6 / view.zoom;
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = 2 / view.zoom;
+                ctx.setLineDash([4 / view.zoom, 3 / view.zoom]);
+                ctx.strokeRect(devBb.x - devPad, devBb.y - devPad, devBb.width + devPad * 2, devBb.height + devPad * 2);
+                ctx.setLineDash([]);
+              }
+            }
+
+            // Cross-highlight linked stroke when a deviation is selected
+            const linkedStroke = annotationLinks.find((l) => l.deviationId === selectedElementId);
+            if (linkedStroke) {
+              const strokeEl = elements.find((e) => e.id === linkedStroke.strokeId);
+              if (strokeEl) {
+                const strokeBb = getBoundingBox(strokeEl);
+                const strokePad = 6 / view.zoom;
+                ctx.strokeStyle = '#f59e0b';
+                ctx.lineWidth = 2 / view.zoom;
+                ctx.setLineDash([4 / view.zoom, 3 / view.zoom]);
+                ctx.strokeRect(strokeBb.x - strokePad, strokeBb.y - strokePad, strokeBb.width + strokePad * 2, strokeBb.height + strokePad * 2);
+                ctx.setLineDash([]);
+              }
+            }
           }
         }
 
@@ -1301,7 +1377,7 @@ export const CADCanvas: React.FC = () => {
 
     animFrameRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animFrameRef.current);
-  }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap, pendingInput, cadTool, cursorX, cursorY, selectedElementId]);
+  }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap, pendingInput, cadTool, cursorX, cursorY, selectedElementId, annotationLinks]);
 
   // ── localStorage persistence ───────────────────────────────────────────────
   useEffect(() => {
@@ -1600,6 +1676,24 @@ export const CADCanvas: React.FC = () => {
         onContextMenu={handleContextMenu}
         onDoubleClick={handleDoubleClick}
       />
+
+      {/* Route tutorial overlay — shown once on first Route mode entry */}
+      <div
+        className="absolute overflow-hidden pointer-events-none"
+        style={{
+          top: `${TOP_BAR_HEIGHT}px`,
+          left: `${canvasLeftOffset}px`,
+          width: `${canvasWidth}px`,
+          height: `${canvasHeight}px`,
+        }}
+      >
+        <div className="pointer-events-auto">
+          <RouteTutorialOverlay
+            isVisible={showRouteTutorial}
+            onDismiss={() => setShowRouteTutorial(false)}
+          />
+        </div>
+      </div>
 
       {/* Hidden ProjectBar (still handles Drive auth + save/open logic, rendered off-screen) */}
       <div className="hidden">
@@ -1932,6 +2026,12 @@ export const CADCanvas: React.FC = () => {
           setScan3DDetections(project.detection3D);
           setSplitMode('split');
           setActiveScanId('demo-scan');
+        }}
+        onLoadRecent={(_name: string) => {
+          // TODO: wire to ProjectBar open-by-name once Drive API supports it.
+          // For now, dismiss the modal — user can open from the project manager.
+          localStorage.setItem('survai_visited', '1');
+          setShowWelcome(false);
         }}
       />
     </div>

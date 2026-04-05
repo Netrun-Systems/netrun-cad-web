@@ -15,6 +15,7 @@ import type { DeviationReport } from '../../services/blueprints';
 import { useAuth } from '../../contexts/AuthContext';
 import { generateDeviationPDF } from '../../engine/deviation-report-pdf';
 import ScaleConfirmDialog from './ScaleConfirmDialog';
+import EmailShareDialog from './EmailShareDialog';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +57,9 @@ export default function BlueprintPanel({
     dxfResult: DXFImportResult;
     apiResponse: BlueprintUploadResponse;
   } | null>(null);
+
+  // Email share dialog state
+  const [showEmailDialog, setShowEmailDialog] = useState(false);
 
   // Drag state
   const [isDragging, setIsDragging] = useState(false);
@@ -244,6 +248,28 @@ export default function BlueprintPanel({
         layerCount={pendingImport.dxfResult.meta.layerCount}
       />
     )}
+    {/* Email share dialog */}
+    <EmailShareDialog
+      isOpen={showEmailDialog}
+      onClose={() => setShowEmailDialog(false)}
+      projectName={activeScanId ?? 'Untitled Project'}
+      deviationReport={deviationReport}
+      deviationEntries={
+        deviationReport
+          ? deviationReport.deviations.map((d) => ({
+              id: d.id,
+              deviation_type: d.deviation_type as 'MATCH' | 'POSITION_DEVIATION' | 'TYPE_MISMATCH' | 'MISSING_IN_SCAN' | 'EXTRA_IN_SCAN',
+              severity: d.severity as 'OK' | 'WARNING' | 'CRITICAL',
+              distance_mm: d.distance_mm,
+              planned_position: null,
+              actual_position: null,
+              planned_type: d.planned_type ?? null,
+              actual_type: d.actual_type ?? null,
+              message: d.message,
+            }))
+          : []
+      }
+    />
     <div className="fixed top-0 right-0 w-80 h-full bg-gray-900 text-gray-100 border-l border-gray-700 z-40 flex flex-col shadow-xl">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
@@ -512,6 +538,15 @@ export default function BlueprintPanel({
               className="w-full py-2 rounded text-sm font-medium bg-indigo-700 hover:bg-indigo-600 text-white transition-colors"
             >
               Export PDF Report
+            </button>
+            <button
+              onClick={() => setShowEmailDialog(true)}
+              className="w-full py-2 rounded text-sm font-medium bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors flex items-center justify-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              Email Report
             </button>
           </div>
         )}

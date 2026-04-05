@@ -40,6 +40,11 @@ import {
   SurvaiUnavailableError,
   type SurvaiScan,
 } from '../../services/survai';
+import {
+  requestNotificationPermission,
+  sendLocalNotification,
+  isNotificationSupported,
+} from '../../services/push-notifications';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -283,6 +288,11 @@ const UploadTab: React.FC<UploadTabProps> = ({ onScanUploaded }) => {
     setUploadProgress(`Uploading ${file.name}…`);
 
     try {
+      // Request notification permission on first scan upload (not page load)
+      if (isNotificationSupported()) {
+        requestNotificationPermission();
+      }
+
       const { scanId } = await uploadScan(file);
       setUploadProgress(`Upload complete — processing started (scan ID: ${scanId.slice(0, 8)}…)`);
       setTimeout(() => {
@@ -373,6 +383,9 @@ export const SurvaiPanel: React.FC<SurvaiPanelProps> = ({ onImport, onClose }) =
   // Polling interval ref — cleared on unmount
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Track previous scan statuses to detect completion transitions
+  const prevStatusesRef = useRef<Map<string, string>>(new Map());
+
   // ── Load scans ──────────────────────────────────────────────────────────────
 
   const loadScans = useCallback(async () => {
@@ -381,6 +394,14 @@ export const SurvaiPanel: React.FC<SurvaiPanelProps> = ({ onImport, onClose }) =
       const results = await listScans();
       // Sort: most recent first
       results.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      // Seed previous statuses so initial load doesn't trigger false notifications
+      const statuses = new Map<string, string>();
+      for (const scan of results) {
+        statuses.set(scan.id, scan.status);
+      }
+      prevStatusesRef.current = statuses;
+
       setScans(results);
       setUnavailable(false);
     } catch (err) {
@@ -409,6 +430,31 @@ export const SurvaiPanel: React.FC<SurvaiPanelProps> = ({ onImport, onClose }) =
         try {
           const results = await listScans();
           results.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+          // Detect scans that just completed and send push notifications
+          for (const scan of results) {
+            const prevStatus = prevStatusesRef.current.get(scan.id);
+            if (
+              scan.status === 'completed' &&
+              prevStatus &&
+              prevStatus !== 'completed'
+            ) {
+              const detCount = scan.detections?.length ?? 0;
+              sendLocalNotification(
+                'Scan Complete',
+                `${detCount} MEP element${detCount !== 1 ? 's' : ''} detected. Tap to view.`,
+                { tag: `scan-complete-${scan.id}` },
+              );
+            }
+          }
+
+          // Update previous statuses map
+          const nextStatuses = new Map<string, string>();
+          for (const scan of results) {
+            nextStatuses.set(scan.id, scan.status);
+          }
+          prevStatusesRef.current = nextStatuses;
+
           setScans(results);
         } catch {
           // Polling errors are silent — user can refresh manually

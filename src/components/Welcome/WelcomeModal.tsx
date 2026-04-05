@@ -3,8 +3,15 @@
  * Highlights core Survai Construction features and offers trial / demo CTAs.
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import type { DemoProject } from '../../data/demo-project';
+
+/** Shape stored in localStorage under `survai_recent_projects`. */
+export interface RecentProject {
+  name: string;
+  date: string;
+  elementCount: number;
+}
 
 interface WelcomeModalProps {
   isOpen: boolean;
@@ -12,6 +19,21 @@ interface WelcomeModalProps {
   onStartTrial: () => void;
   onDemo: () => void;
   onLoadDemo?: (project: DemoProject) => void;
+  onLoadRecent?: (projectName: string) => void;
+}
+
+/** Convert an ISO date string to a human-readable relative time. */
+function relativeTime(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days > 1 ? 's' : ''} ago`;
+  return new Date(dateStr).toLocaleDateString();
 }
 
 const FEATURES = [
@@ -50,7 +72,20 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   onStartTrial,
   onDemo,
   onLoadDemo,
+  onLoadRecent,
 }) => {
+  const recentProjects = useMemo<RecentProject[]>(() => {
+    try {
+      const raw = localStorage.getItem('survai_recent_projects');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.slice(0, 3);
+    } catch {
+      return [];
+    }
+  }, [isOpen]); // re-read when modal opens
+
   if (!isOpen) return null;
 
   return (
@@ -101,6 +136,43 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* Recent Projects */}
+          <div className="px-6 mb-4">
+            <h3 className="text-gray-400 text-[11px] uppercase tracking-wider font-semibold mb-2">
+              Recent Projects
+            </h3>
+            {recentProjects.length > 0 ? (
+              <div className="space-y-1.5">
+                {recentProjects.map((p, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      onLoadRecent?.(p.name);
+                      onClose();
+                    }}
+                    className="w-full flex items-center gap-3 rounded-lg p-2.5 bg-gray-800/40 border border-gray-700/40
+                               hover:bg-gray-700/60 hover:border-gray-600 transition-colors text-left group"
+                  >
+                    <svg className="w-5 h-5 text-gray-500 group-hover:text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    </svg>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-gray-200 text-xs font-medium truncate">{p.name}</p>
+                      <p className="text-gray-500 text-[10px]">
+                        {relativeTime(p.date)} &middot; {p.elementCount} element{p.elementCount !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                    <svg className="w-4 h-4 text-gray-600 group-hover:text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-600 text-xs italic">No recent projects</p>
+            )}
           </div>
 
           {/* CTAs */}
