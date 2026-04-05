@@ -6,6 +6,7 @@
 import React, { useState, useCallback, useRef } from 'react';
 import type { CADElement } from '../../engine/types';
 import { importDXF } from '../../engine/dxf-import';
+import type { DXFImportResult } from '../../engine/dxf-import';
 import { deviationsToElements } from '../../engine/deviation-renderer';
 import type { DeviationReport as RendererDeviationReport } from '../../engine/deviation-renderer';
 import { api } from '../../services/api';
@@ -13,6 +14,7 @@ import type { BlueprintUploadResponse } from '../../services/blueprints';
 import type { DeviationReport } from '../../services/blueprints';
 import { useAuth } from '../../contexts/AuthContext';
 import { generateDeviationPDF } from '../../engine/deviation-report-pdf';
+import ScaleConfirmDialog from './ScaleConfirmDialog';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +50,13 @@ export default function BlueprintPanel({
   const [deviationReport, setDeviationReport] = useState<DeviationReport | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
 
+  // Scale confirmation dialog state
+  const [showScaleDialog, setShowScaleDialog] = useState(false);
+  const [pendingImport, setPendingImport] = useState<{
+    dxfResult: DXFImportResult;
+    apiResponse: BlueprintUploadResponse;
+  } | null>(null);
+
   // Drag state
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -66,13 +75,8 @@ export default function BlueprintPanel({
       setCompareError(null);
 
       try {
-        // Parse DXF locally for immediate canvas rendering
+        // Parse DXF locally (with scale=1 initially — user will confirm)
         const dxfResult = await importDXF(file);
-        // Place imported elements on the blueprint layer
-        const blueprintElements = dxfResult.elements.map((el) => ({
-          ...el,
-          layerId: 'blueprint',
-        }));
 
         // Upload to API simultaneously
         const response = await api.uploadBlueprint(activeScanId, file);
@@ -80,16 +84,72 @@ export default function BlueprintPanel({
         setUploadResponse(response);
         setBlueprintId(response.id);
 
-        // Notify parent with local elements + blueprint ID
-        onBlueprintImported(blueprintElements, response.id);
+        // Show scale confirmation dialog instead of placing elements immediately
+        setPendingImport({ dxfResult, apiResponse: response });
+        setShowScaleDialog(true);
       } catch (err) {
         setUploadError(err instanceof Error ? err.message : 'Upload failed');
       } finally {
         setIsUploading(false);
       }
     },
-    [activeScanId, onBlueprintImported],
+    [activeScanId],
   );
+
+  const handleScaleConfirm = useCallback(
+    (scaleFactor: number) => {
+      if (!pendingImport) return;
+
+      const { dxfResult, apiResponse } = pendingImport;
+      const PIXELS_PER_FOOT = 48;
+
+      // Re-scale elements: the original import used scale=1, so raw DXF coords
+      // were converted as if 1 DXF unit = 1 foot. We need to apply the user's
+      // chosen scale factor relative to that.
+      const blueprintElements = dxfResult.elements.map((el) => {
+        // Scale all coordinate values by the ratio
+        const scalePoint = (p: { x: number; y: number }) => ({
+          x: (p.x / PIXELS_PER_FOOT) * scaleFactor * PIXELS_PER_FOOT,
+          y: (p.y / PIXELS_PER_FOOT) * scaleFactor * PIXELS_PER_FOOT,
+        });
+
+        const scaled = { ...el, layerId: 'blueprint' };
+
+        if (scaled.type === 'line') {
+          const line = scaled as CADElement & { p1: { x: number; y: number }; p2: { x: number; y: number } };
+          line.p1 = scalePoint(line.p1);
+          line.p2 = scalePoint(line.p2);
+        } else if (scaled.type === 'circle') {
+          const circle = scaled as CADElement & { center: { x: number; y: number }; radius: number };
+          circle.center = scalePoint(circle.center);
+          circle.radius = (circle.radius / PIXELS_PER_FOOT) * scaleFactor * PIXELS_PER_FOOT;
+        } else if (scaled.type === 'rectangle') {
+          const rect = scaled as CADElement & { origin: { x: number; y: number }; width: number; height: number };
+          rect.origin = scalePoint(rect.origin);
+          rect.width = (rect.width / PIXELS_PER_FOOT) * scaleFactor * PIXELS_PER_FOOT;
+          rect.height = (rect.height / PIXELS_PER_FOOT) * scaleFactor * PIXELS_PER_FOOT;
+        } else if (scaled.type === 'text') {
+          const text = scaled as CADElement & { position: { x: number; y: number } };
+          text.position = scalePoint(text.position);
+        }
+
+        return scaled;
+      });
+
+      onBlueprintImported(blueprintElements, apiResponse.id);
+      setShowScaleDialog(false);
+      setPendingImport(null);
+    },
+    [pendingImport, onBlueprintImported],
+  );
+
+  const handleScaleCancel = useCallback(() => {
+    setShowScaleDialog(false);
+    setPendingImport(null);
+    // Reset upload state since user cancelled
+    setUploadResponse(null);
+    setBlueprintId(null);
+  }, []);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -171,6 +231,19 @@ export default function BlueprintPanel({
   if (!isOpen) return null;
 
   return (
+    <>
+    {/* Scale confirmation dialog */}
+    {showScaleDialog && pendingImport && (
+      <ScaleConfirmDialog
+        isOpen={showScaleDialog}
+        onConfirm={handleScaleConfirm}
+        onCancel={handleScaleCancel}
+        detectedUnit={pendingImport.dxfResult.meta.detectedUnit}
+        boundingBox={pendingImport.dxfResult.meta.rawBoundingBox}
+        elementCount={pendingImport.dxfResult.meta.elementCount}
+        layerCount={pendingImport.dxfResult.meta.layerCount}
+      />
+    )}
     <div className="fixed top-0 right-0 w-80 h-full bg-gray-900 text-gray-100 border-l border-gray-700 z-40 flex flex-col shadow-xl">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
@@ -444,5 +517,6 @@ export default function BlueprintPanel({
         )}
       </div>
     </div>
+    </>
   );
 }

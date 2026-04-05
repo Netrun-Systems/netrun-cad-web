@@ -52,6 +52,87 @@ type Tab = 'scans' | 'upload';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// ── Processing step definitions ──────────────────────────────────────────────
+
+interface ProcessingStep {
+  label: string;
+  note?: string;
+  /** Progress range [min, max) that maps to this step being active */
+  range: [number, number];
+}
+
+const PROCESSING_STEPS: ProcessingStep[] = [
+  { label: 'Upload',           range: [0, 10] },
+  { label: 'Mesh Processing',  range: [10, 25] },
+  { label: 'ML Detection',     range: [25, 70], note: '~2-5 min for typical scan' },
+  { label: 'Route Estimation',  range: [70, 90] },
+  { label: 'Complete',          range: [90, 101] },
+];
+
+function getActiveStepIndex(progress: number): number {
+  for (let i = 0; i < PROCESSING_STEPS.length; i++) {
+    const [min, max] = PROCESSING_STEPS[i].range;
+    if (progress >= min && progress < max) return i;
+  }
+  return PROCESSING_STEPS.length - 1;
+}
+
+// ── Step indicator sub-component ─────────────────────────────────────────────
+
+const ProcessingStepIndicator: React.FC<{ progress: number }> = ({ progress }) => {
+  const activeIdx = getActiveStepIndex(progress);
+
+  return (
+    <div className="mt-2 space-y-1">
+      {PROCESSING_STEPS.map((step, i) => {
+        const isDone = i < activeIdx;
+        const isActive = i === activeIdx;
+        const isPending = i > activeIdx;
+
+        return (
+          <div key={step.label} className="flex items-center gap-2 text-xs">
+            {/* Step icon */}
+            <div className="w-4 h-4 flex items-center justify-center shrink-0">
+              {isDone ? (
+                <svg className="w-3.5 h-3.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+              ) : isActive ? (
+                <div className="w-2.5 h-2.5 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <div className="w-2 h-2 rounded-full bg-cad-accent/40" />
+              )}
+            </div>
+
+            {/* Label */}
+            <span
+              className={
+                isDone ? 'text-green-400/70 line-through' :
+                isActive ? 'text-yellow-400 font-medium' :
+                'text-cad-dim/60'
+              }
+            >
+              {step.label}
+            </span>
+
+            {/* Note for active step */}
+            {isActive && step.note && (
+              <span className="text-cad-dim/50 text-[10px] ml-auto">{step.note}</span>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Time estimate */}
+      <div className="text-cad-dim/50 text-[10px] mt-1 pt-1 border-t border-cad-accent/20">
+        Estimated: 2-5 minutes
+      </div>
+    </div>
+  );
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
 function statusColor(status: SurvaiScan['status']): string {
   switch (status) {
     case 'completed':  return 'text-green-400';
@@ -142,12 +223,17 @@ const ScanRow: React.FC<ScanRowProps> = ({ scan, onImport, importing }) => (
 
       {/* Progress bar for in-progress scans */}
       {(scan.status === 'processing' || scan.status === 'uploaded' || scan.status === 'pending') && (
-        <div className="mt-1.5 h-1 bg-cad-surface rounded-full overflow-hidden">
-          <div
-            className="h-full bg-yellow-500 rounded-full transition-all duration-500"
-            style={{ width: `${scan.progress ?? 5}%` }}
-          />
-        </div>
+        <>
+          <div className="mt-1.5 h-1 bg-cad-surface rounded-full overflow-hidden">
+            <div
+              className="h-full bg-yellow-500 rounded-full transition-all duration-500"
+              style={{ width: `${scan.progress ?? 5}%` }}
+            />
+          </div>
+          {scan.status === 'processing' && (
+            <ProcessingStepIndicator progress={scan.progress ?? 0} />
+          )}
+        </>
       )}
 
       {/* Detection count for completed scans */}

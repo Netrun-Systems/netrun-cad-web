@@ -151,6 +151,58 @@ function discoverLayers(pairs: Pair[]): ImportedLayers {
   return { layers: newLayers, entityLayerMap };
 }
 
+// ── DXF header unit detection ────────────────────────────────────────────────
+
+/** Map DXF $INSUNITS values to human-readable unit names */
+const DXF_UNIT_MAP: Record<number, string> = {
+  0: 'unknown',
+  1: 'inches',
+  2: 'feet',
+  3: 'miles',
+  4: 'millimeters',
+  5: 'centimeters',
+  6: 'meters',
+  7: 'kilometers',
+};
+
+function detectUnit(pairs: Pair[]): string {
+  // Look for $INSUNITS in HEADER section
+  for (let i = 0; i < pairs.length; i++) {
+    if (pairs[i].code === 9 && pairs[i].value === '$INSUNITS') {
+      // The value follows as the next group code 70
+      for (let j = i + 1; j < Math.min(i + 5, pairs.length); j++) {
+        if (pairs[j].code === 70) {
+          const unitCode = parseInt(pairs[j].value, 10);
+          return DXF_UNIT_MAP[unitCode] ?? 'unknown';
+        }
+      }
+    }
+  }
+  return 'unknown';
+}
+
+/** Compute raw bounding box from DXF entity blocks (before pixel conversion) */
+function computeRawBoundingBox(blocks: EntityBlock[]): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+  for (const block of blocks) {
+    // Collect all X coordinates (codes 10, 11, 12, 13, 14)
+    for (const pair of block.codes) {
+      if (pair.code >= 10 && pair.code <= 14) {
+        const v = parseFloat(pair.value);
+        if (!isNaN(v)) { minX = Math.min(minX, v); maxX = Math.max(maxX, v); }
+      }
+      if (pair.code >= 20 && pair.code <= 24) {
+        const v = parseFloat(pair.value);
+        if (!isNaN(v)) { minY = Math.min(minY, v); maxY = Math.max(maxY, v); }
+      }
+    }
+  }
+
+  if (!isFinite(minX)) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  return { minX, minY, maxX, maxY };
+}
+
 // ── DXF units → feet conversion ──────────────────────────────────────────────
 // DXF files can use various units. We assume drawing units = feet (common for US
 // landscape plans). If the file uses inches, pass scale=1/12.
@@ -329,6 +381,17 @@ function convertInsert(
 export interface DXFImportResult {
   elements: CADElement[];
   newLayers: Layer[];
+  /** Metadata extracted from the DXF file for scale confirmation */
+  meta: {
+    /** Unit string from DXF $INSUNITS header, or 'unknown' */
+    detectedUnit: string;
+    /** Bounding box of all imported elements in raw DXF coordinates */
+    rawBoundingBox: { minX: number; minY: number; maxX: number; maxY: number };
+    /** Total element count */
+    elementCount: number;
+    /** Total layer count (new + existing) */
+    layerCount: number;
+  };
 }
 
 /**
@@ -340,8 +403,10 @@ export async function importDXF(file: File, scale = 1): Promise<DXFImportResult>
   const text = await file.text();
   const pairs = parsePairs(text);
 
+  const detectedUnit = detectUnit(pairs);
   const { layers: newLayers, entityLayerMap } = discoverLayers(pairs);
   const blocks = extractEntityBlocks(pairs);
+  const rawBoundingBox = computeRawBoundingBox(blocks);
 
   const elements: CADElement[] = [];
   let counter = 0;
@@ -384,5 +449,14 @@ export async function importDXF(file: File, scale = 1): Promise<DXFImportResult>
     }
   }
 
-  return { elements, newLayers };
+  return {
+    elements,
+    newLayers,
+    meta: {
+      detectedUnit,
+      rawBoundingBox,
+      elementCount: elements.length,
+      layerCount: newLayers.length + new Set(elements.map((e) => e.layerId)).size,
+    },
+  };
 }
