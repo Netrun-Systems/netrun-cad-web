@@ -1,0 +1,13 @@
+# Based on default but includes .env.production (needed for Vite build)
+.git
+.gitignore
+.gcloudignore
+node_modules/
+dist/
+.DS_Store
+*.log
+# Keep .env.production — Vite reads it at build time
+# (it IS sensitive, but it only contains Google Drive client IDs which
+# are public per OAuth flow design; the secret is NOT sensitive on the
+# same level as a private key)
+!.env.production
