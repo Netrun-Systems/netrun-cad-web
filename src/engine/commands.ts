@@ -143,6 +143,21 @@ export const COMMANDS: Command[] = [
   { aliases: ['pricing', 'plans'],      action: 'panel:pricing',         description: 'Open pricing page',           requiresPoints: 0, category: 'file' },
   { aliases: ['account', 'profile'],    action: 'panel:account',         description: 'Open account panel',          requiresPoints: 0, category: 'file' },
 
+  // ── DIAGRAM (BPMN / flowchart) ────────────────────────────────────────────
+  { aliases: ['flow', 'flowchart', 'diagram', 'bpmn'], action: 'mode:diagram',           description: 'Enter diagram mode',          requiresPoints: 0, category: 'diagram' },
+  { aliases: ['box'],                                  action: 'tool:diagram:box',           description: 'Diagram: rectangle box',  requiresPoints: 2, category: 'diagram' },
+  { aliases: ['rrect', 'rounded'],                     action: 'tool:diagram:rounded',       description: 'Diagram: rounded box',    requiresPoints: 2, category: 'diagram' },
+  { aliases: ['oval', 'dellipse'],                     action: 'tool:diagram:ellipse',       description: 'Diagram: ellipse',        requiresPoints: 2, category: 'diagram' },
+  { aliases: ['diam', 'diamond', 'decision'],          action: 'tool:diagram:diamond',       description: 'Diagram: decision diamond', requiresPoints: 2, category: 'diagram' },
+  { aliases: ['para', 'parallel'],                     action: 'tool:diagram:parallelogram', description: 'Diagram: parallelogram',  requiresPoints: 2, category: 'diagram' },
+  { aliases: ['cyl', 'cylinder', 'database'],          action: 'tool:diagram:cylinder',      description: 'Diagram: cylinder/database', requiresPoints: 2, category: 'diagram' },
+  { aliases: ['hex', 'hexagon'],                       action: 'tool:diagram:hexagon',       description: 'Diagram: hexagon',        requiresPoints: 2, category: 'diagram' },
+  { aliases: ['conn', 'connector', 'arrow'],           action: 'tool:diagram:connector',     description: 'Diagram: connector arrow', requiresPoints: 2, category: 'diagram' },
+  { aliases: ['swim', 'swimlane', 'lanes'],            action: 'tool:diagram:swimlane-h',    description: 'Diagram: horizontal swimlanes', requiresPoints: 2, category: 'diagram' },
+  { aliases: ['vlanes', 'vswim'],                      action: 'tool:diagram:swimlane-v',    description: 'Diagram: vertical swimlanes',   requiresPoints: 2, category: 'diagram' },
+  { aliases: ['group', 'gpr'],                         action: 'tool:diagram:group',         description: 'Diagram: group container',      requiresPoints: 2, category: 'diagram' },
+  { aliases: ['dselect'],                              action: 'tool:diagram:select',        description: 'Diagram: select tool',          requiresPoints: 0, category: 'diagram' },
+
   // ── SURVAI (3D scan / deviation / routing) ────────────────────────────────
   { aliases: ['3dview', '3d'],          action: 'toggle3DView',          description: 'Toggle 3D viewport',          requiresPoints: 0, category: 'survai' },
   { aliases: ['blueprint', 'bp'],       action: 'openBlueprintPanel',    description: 'Upload blueprint DXF',        requiresPoints: 0, category: 'survai' },

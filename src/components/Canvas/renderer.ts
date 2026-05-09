@@ -9,6 +9,9 @@ import type {
   TextElement,
   PlantPlacement,
   InteriorSymbolPlacement,
+  FlowchartShape,
+  Connector,
+  DiagramContainer,
   Layer,
   ViewState,
   GridSettings,
@@ -17,6 +20,7 @@ import { distance, formatMeasurement, midpoint, angle } from '../../engine/geome
 import { PLANT_DATABASE } from '../../data/plants';
 import { INTERIOR_SYMBOLS } from '../../data/interior-symbols';
 import { renderInteriorSymbol } from '../../engine/interior-renderer';
+import { drawIconCanvas } from '../../engine/diagram-icons';
 
 /** Render the grid onto a canvas context */
 export function renderGrid(
@@ -274,6 +278,292 @@ function renderInteriorSymbolEl(ctx: CanvasRenderingContext2D, el: InteriorSymbo
   ctx.restore();
 }
 
+function tracePath(ctx: CanvasRenderingContext2D, points: { x: number; y: number }[], close = false) {
+  if (points.length === 0) return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+  if (close) ctx.closePath();
+}
+
+function renderFlowchartShape(ctx: CanvasRenderingContext2D, el: FlowchartShape) {
+  const { origin, width: w, height: h, shape } = el;
+  const cx = origin.x + w / 2;
+  const cy = origin.y + h / 2;
+
+  ctx.save();
+  if (el.rotation) {
+    ctx.translate(cx, cy);
+    ctx.rotate((el.rotation * Math.PI) / 180);
+    ctx.translate(-cx, -cy);
+  }
+
+  ctx.fillStyle = el.fillColor;
+  ctx.strokeStyle = el.strokeColor;
+  ctx.lineWidth = el.strokeWidth;
+
+  switch (shape) {
+    case 'rectangle':
+      ctx.fillRect(origin.x, origin.y, w, h);
+      ctx.strokeRect(origin.x, origin.y, w, h);
+      break;
+    case 'rounded': {
+      const r = Math.min(w, h) * 0.15;
+      ctx.beginPath();
+      ctx.moveTo(origin.x + r, origin.y);
+      ctx.lineTo(origin.x + w - r, origin.y);
+      ctx.arcTo(origin.x + w, origin.y, origin.x + w, origin.y + r, r);
+      ctx.lineTo(origin.x + w, origin.y + h - r);
+      ctx.arcTo(origin.x + w, origin.y + h, origin.x + w - r, origin.y + h, r);
+      ctx.lineTo(origin.x + r, origin.y + h);
+      ctx.arcTo(origin.x, origin.y + h, origin.x, origin.y + h - r, r);
+      ctx.lineTo(origin.x, origin.y + r);
+      ctx.arcTo(origin.x, origin.y, origin.x + r, origin.y, r);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      break;
+    }
+    case 'ellipse':
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      break;
+    case 'diamond':
+      tracePath(ctx, [
+        { x: cx, y: origin.y },
+        { x: origin.x + w, y: cy },
+        { x: cx, y: origin.y + h },
+        { x: origin.x, y: cy },
+      ], true);
+      ctx.fill();
+      ctx.stroke();
+      break;
+    case 'parallelogram': {
+      const skew = w * 0.2;
+      tracePath(ctx, [
+        { x: origin.x + skew, y: origin.y },
+        { x: origin.x + w, y: origin.y },
+        { x: origin.x + w - skew, y: origin.y + h },
+        { x: origin.x, y: origin.y + h },
+      ], true);
+      ctx.fill();
+      ctx.stroke();
+      break;
+    }
+    case 'cylinder': {
+      const ry = h * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(origin.x, origin.y + ry);
+      ctx.lineTo(origin.x, origin.y + h - ry);
+      ctx.ellipse(cx, origin.y + h - ry, w / 2, ry, 0, Math.PI, 0, true);
+      ctx.lineTo(origin.x + w, origin.y + ry);
+      ctx.ellipse(cx, origin.y + ry, w / 2, ry, 0, 0, Math.PI, true);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Top ellipse outline
+      ctx.beginPath();
+      ctx.ellipse(cx, origin.y + ry, w / 2, ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+    }
+    case 'hexagon': {
+      const inset = w * 0.15;
+      tracePath(ctx, [
+        { x: origin.x + inset, y: origin.y },
+        { x: origin.x + w - inset, y: origin.y },
+        { x: origin.x + w, y: cy },
+        { x: origin.x + w - inset, y: origin.y + h },
+        { x: origin.x + inset, y: origin.y + h },
+        { x: origin.x, y: cy },
+      ], true);
+      ctx.fill();
+      ctx.stroke();
+      break;
+    }
+  }
+
+  // Icon overlay (positioned top-left when text is present, centered when not)
+  if (el.iconRef) {
+    const iconSize = el.iconSize ?? Math.min(28, Math.min(w, h) * 0.35);
+    if (el.text) {
+      // Top-left badge with subtle backdrop circle
+      const ix = origin.x + iconSize / 2 + 8;
+      const iy = origin.y + iconSize / 2 + 8;
+      ctx.save();
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = el.iconColor ?? el.strokeColor;
+      ctx.beginPath();
+      ctx.arc(ix, iy, iconSize * 0.65, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      drawIconCanvas(ctx, el.iconRef, ix, iy, iconSize, el.iconColor);
+    } else {
+      const iconPxSize = el.iconSize ?? Math.min(w, h) * 0.5;
+      drawIconCanvas(ctx, el.iconRef, cx, cy, iconPxSize, el.iconColor);
+    }
+  }
+
+  if (el.text) {
+    const fontSize = el.fontSize ?? 14;
+    const family = el.fontFamily ?? 'sans-serif';
+    ctx.fillStyle = el.textColor ?? '#111827';
+    ctx.font = `${fontSize}px ${family}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const lines = el.text.split('\n');
+    const lineHeight = fontSize * 1.25;
+    const totalHeight = lineHeight * (lines.length - 1);
+    // Shift text down slightly when an icon is present
+    const textOffset = el.iconRef ? 8 : 0;
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], cx, cy + textOffset - totalHeight / 2 + i * lineHeight);
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawArrowhead(ctx: CanvasRenderingContext2D, tip: { x: number; y: number }, from: { x: number; y: number }, color: string, size = 10) {
+  const ang = Math.atan2(tip.y - from.y, tip.x - from.x);
+  const wing = Math.PI / 6;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(tip.x, tip.y);
+  ctx.lineTo(tip.x - size * Math.cos(ang - wing), tip.y - size * Math.sin(ang - wing));
+  ctx.lineTo(tip.x - size * Math.cos(ang + wing), tip.y - size * Math.sin(ang + wing));
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawDot(ctx: CanvasRenderingContext2D, p: { x: number; y: number }, color: string, r = 4) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function renderConnector(ctx: CanvasRenderingContext2D, el: Connector) {
+  const path = el.cachedPath;
+  if (!path || path.length < 2) return;
+
+  ctx.save();
+  ctx.strokeStyle = el.strokeColor;
+  ctx.lineWidth = el.strokeWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(path[0].x, path[0].y);
+  for (let i = 1; i < path.length; i++) ctx.lineTo(path[i].x, path[i].y);
+  ctx.stroke();
+
+  if (el.endCap === 'arrow') {
+    drawArrowhead(ctx, path[path.length - 1], path[path.length - 2], el.strokeColor);
+  } else if (el.endCap === 'dot') {
+    drawDot(ctx, path[path.length - 1], el.strokeColor);
+  }
+  if (el.startCap === 'arrow') {
+    drawArrowhead(ctx, path[0], path[1], el.strokeColor);
+  } else if (el.startCap === 'dot') {
+    drawDot(ctx, path[0], el.strokeColor);
+  }
+
+  if (el.label) {
+    const last = path[path.length - 1];
+    const first = path[0];
+    const lcx = (first.x + last.x) / 2;
+    const lcy = (first.y + last.y) / 2;
+    ctx.fillStyle = el.strokeColor;
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(el.label, lcx, lcy - 4);
+  }
+
+  ctx.restore();
+}
+
+function renderContainer(ctx: CanvasRenderingContext2D, el: DiagramContainer) {
+  const { origin, width: w, height: h } = el;
+  const titleHeight = el.title ? 24 : 0;
+
+  ctx.save();
+  if (el.fillColor) {
+    ctx.fillStyle = el.fillColor;
+    ctx.fillRect(origin.x, origin.y, w, h);
+  }
+  ctx.strokeStyle = el.strokeColor;
+  ctx.lineWidth = el.strokeWidth;
+  ctx.strokeRect(origin.x, origin.y, w, h);
+
+  if (el.title) {
+    ctx.save();
+    ctx.fillStyle = el.strokeColor;
+    ctx.globalAlpha = 0.1;
+    ctx.fillRect(origin.x, origin.y, w, titleHeight);
+    ctx.restore();
+    ctx.strokeRect(origin.x, origin.y, w, titleHeight);
+    ctx.fillStyle = el.strokeColor;
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(el.title, origin.x + 8, origin.y + titleHeight / 2);
+  }
+
+  const lanes = el.laneCount ?? 0;
+  if (lanes > 1 && el.containerType !== 'group') {
+    const isHorizontal = el.containerType === 'swimlane-h';
+    const usable = isHorizontal ? h - titleHeight : w;
+    const step = usable / lanes;
+    ctx.save();
+    ctx.strokeStyle = el.strokeColor;
+    ctx.lineWidth = el.strokeWidth * 0.6;
+    ctx.setLineDash([6, 4]);
+    for (let i = 1; i < lanes; i++) {
+      ctx.beginPath();
+      if (isHorizontal) {
+        const y = origin.y + titleHeight + step * i;
+        ctx.moveTo(origin.x, y);
+        ctx.lineTo(origin.x + w, y);
+      } else {
+        const x = origin.x + step * i;
+        ctx.moveTo(x, origin.y + titleHeight);
+        ctx.lineTo(x, origin.y + h);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    if (el.laneLabels) {
+      ctx.fillStyle = el.strokeColor;
+      ctx.font = '11px sans-serif';
+      for (let i = 0; i < Math.min(lanes, el.laneLabels.length); i++) {
+        const label = el.laneLabels[i];
+        if (!label) continue;
+        if (isHorizontal) {
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          const ly = origin.y + titleHeight + step * (i + 0.5);
+          ctx.fillText(label, origin.x + 8, ly);
+        } else {
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          const lx = origin.x + step * (i + 0.5);
+          ctx.fillText(label, lx, origin.y + titleHeight + 4);
+        }
+      }
+    }
+  }
+
+  ctx.restore();
+}
+
 function renderPlant(ctx: CanvasRenderingContext2D, el: PlantPlacement, grid: GridSettings) {
   const plant = PLANT_DATABASE.find((p) => p.id === el.plantId);
   if (!plant) return;
@@ -393,6 +683,15 @@ export function renderAll(
         break;
       case 'interior-symbol':
         renderInteriorSymbolEl(ctx, el as InteriorSymbolPlacement);
+        break;
+      case 'flowchart-shape':
+        renderFlowchartShape(ctx, el);
+        break;
+      case 'connector':
+        renderConnector(ctx, el);
+        break;
+      case 'container':
+        renderContainer(ctx, el);
         break;
     }
 

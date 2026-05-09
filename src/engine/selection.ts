@@ -173,6 +173,17 @@ export function getBoundingBox(element: CADElement): { x: number; y: number; wid
       const minY = Math.min(...ys);
       return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
     }
+    case 'flowchart-shape':
+    case 'container':
+      return { x: element.origin.x, y: element.origin.y, width: element.width, height: element.height };
+    case 'connector': {
+      if (!element.cachedPath || element.cachedPath.length === 0) return { x: 0, y: 0, width: 0, height: 0 };
+      const xs = element.cachedPath.map((p) => p.x);
+      const ys = element.cachedPath.map((p) => p.y);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
+    }
     default:
       return { x: 0, y: 0, width: 0, height: 0 };
   }

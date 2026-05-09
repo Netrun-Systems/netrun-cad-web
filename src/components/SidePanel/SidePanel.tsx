@@ -13,7 +13,7 @@
 import React, { useState } from 'react';
 import type { Orientation } from '../../hooks/useOrientation';
 import type { Handedness } from '../../hooks/useHandedness';
-import type { AppMode, CADTool, DrawBrush, ColorBrush, Layer, GridSettings } from '../../engine/types';
+import type { AppMode, CADTool, DiagramTool, DrawBrush, ColorBrush, Layer, GridSettings } from '../../engine/types';
 import { COLOR_PALETTE } from '../Canvas/useColorTools';
 
 // ── Side Panel Width Constants ────────────────────────────────────────────────
@@ -71,6 +71,17 @@ interface SidePanelProps {
   textInput: string;
   setTextInput: (text: string) => void;
 
+  // Diagram tools
+  diagramTool: DiagramTool;
+  setDiagramTool: (tool: DiagramTool) => void;
+  diagramFillColor: string;
+  setDiagramFillColor: (color: string) => void;
+  diagramStrokeColor: string;
+  setDiagramStrokeColor: (color: string) => void;
+  diagramStrokeWidth: number;
+  setDiagramStrokeWidth: (width: number) => void;
+  onShowDiagramSymbols?: () => void;
+
   // Layers
   layers: Layer[];
   activeLayerId: string;
@@ -97,6 +108,7 @@ const MODES: { key: AppMode; label: string; shortcut: string; icon: string }[] =
   { key: 'draw', label: 'Draw', shortcut: '2', icon: '✏️' },
   { key: 'color', label: 'Color', shortcut: '3', icon: '🎨' },
   { key: 'text', label: 'Text', shortcut: '4', icon: '𝐀' },
+  { key: 'diagram', label: 'Diagram', shortcut: '5', icon: '◆' },
 ];
 
 const CAD_TOOLS: { key: CADTool; label: string; shortcut: string }[] = [
@@ -106,6 +118,24 @@ const CAD_TOOLS: { key: CADTool; label: string; shortcut: string }[] = [
   { key: 'circle', label: 'Circle', shortcut: 'C' },
   { key: 'dimension', label: 'Dim', shortcut: 'D' },
 ];
+
+const DIAGRAM_TOOLS: { key: DiagramTool; label: string; short: string; group: 'shape' | 'flow' | 'container' }[] = [
+  { key: 'select', label: 'Select', short: 'V', group: 'shape' },
+  { key: 'box', label: 'Box', short: '▭', group: 'shape' },
+  { key: 'rounded', label: 'Rounded', short: '▢', group: 'shape' },
+  { key: 'ellipse', label: 'Ellipse', short: '◯', group: 'shape' },
+  { key: 'diamond', label: 'Diamond', short: '◇', group: 'shape' },
+  { key: 'parallelogram', label: 'Parallel', short: '▱', group: 'shape' },
+  { key: 'cylinder', label: 'Cylinder', short: '▥', group: 'shape' },
+  { key: 'hexagon', label: 'Hexagon', short: '⬡', group: 'shape' },
+  { key: 'connector', label: 'Connector', short: '→', group: 'flow' },
+  { key: 'swimlane-h', label: 'Lanes H', short: '⊟', group: 'container' },
+  { key: 'swimlane-v', label: 'Lanes V', short: '⊞', group: 'container' },
+  { key: 'group', label: 'Group', short: '▣', group: 'container' },
+];
+
+const DIAGRAM_FILL_PALETTE = ['#dbeafe', '#dcfce7', '#fef3c7', '#fce7f3', '#e9d5ff', '#fee2e2', '#ffffff', '#1f2937'];
+const DIAGRAM_STROKE_PALETTE = ['#1e3a8a', '#065f46', '#92400e', '#9d174d', '#581c87', '#991b1b', '#374151', '#000000'];
 
 const LINE_COLORS = ['#ffffff', '#88ccff', '#ff9800', '#4caf50', '#e94560', '#ffeb3b'];
 
@@ -218,6 +248,15 @@ export const SidePanel: React.FC<SidePanelProps> = ({
   setColorOpacity,
   textInput,
   setTextInput,
+  diagramTool,
+  setDiagramTool,
+  diagramFillColor,
+  setDiagramFillColor,
+  diagramStrokeColor,
+  setDiagramStrokeColor,
+  diagramStrokeWidth,
+  setDiagramStrokeWidth,
+  onShowDiagramSymbols,
   layers,
   activeLayerId,
   onSelectLayer,
@@ -595,6 +634,100 @@ export const SidePanel: React.FC<SidePanelProps> = ({
               className="w-full bg-cad-bg border border-cad-accent rounded px-2 py-2 text-cad-text text-xs outline-none focus:border-blue-400 min-h-[44px]"
             />
             <p className="text-cad-dim text-[10px] mt-1">Click canvas to place</p>
+          </div>
+        )}
+
+        {mode === 'diagram' && (
+          <div className={isPortrait ? 'flex flex-col items-center gap-0.5 px-0.5 py-1' : 'px-2 py-2'}>
+            <div className={isPortrait ? 'flex flex-col items-center gap-0.5' : 'grid grid-cols-3 gap-1 mb-3'}>
+              {DIAGRAM_TOOLS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setDiagramTool(t.key)}
+                  className={`
+                    flex items-center justify-center rounded-md transition-colors
+                    min-w-[44px] min-h-[44px]
+                    ${isPortrait ? 'w-11 h-11' : 'px-1 py-2'}
+                    ${diagramTool === t.key
+                      ? 'bg-cad-accent text-white'
+                      : 'text-cad-dim hover:text-cad-text hover:bg-cad-accent/20'
+                    }
+                  `}
+                  title={t.label}
+                  aria-label={t.label}
+                >
+                  <span className="text-[14px] leading-none">{t.short}</span>
+                </button>
+              ))}
+            </div>
+
+            {!isPortrait && (
+              <>
+                <div className="mb-3">
+                  <span className="text-cad-dim text-[10px] uppercase tracking-wider block mb-1">Fill</span>
+                  <div className="flex flex-wrap gap-1">
+                    {DIAGRAM_FILL_PALETTE.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setDiagramFillColor(c)}
+                        className={`w-6 h-6 min-w-[24px] min-h-[24px] rounded border-2 transition-transform ${
+                          diagramFillColor === c ? 'border-white scale-110' : 'border-cad-accent/40'
+                        }`}
+                        style={{ backgroundColor: c }}
+                        aria-label={`Fill ${c}`}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      value={diagramFillColor}
+                      onChange={(e) => setDiagramFillColor(e.target.value)}
+                      className="w-6 h-6 rounded cursor-pointer bg-transparent border-0"
+                      title="Custom fill"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-3">
+                  <span className="text-cad-dim text-[10px] uppercase tracking-wider block mb-1">Stroke</span>
+                  <div className="flex flex-wrap gap-1">
+                    {DIAGRAM_STROKE_PALETTE.map((c) => (
+                      <button
+                        key={c}
+                        onClick={() => setDiagramStrokeColor(c)}
+                        className={`w-6 h-6 min-w-[24px] min-h-[24px] rounded-full border-2 transition-transform ${
+                          diagramStrokeColor === c ? 'border-white scale-110' : 'border-transparent'
+                        }`}
+                        style={{ backgroundColor: c }}
+                        aria-label={`Stroke ${c}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mb-3">
+                  <span className="text-cad-dim text-[10px] uppercase tracking-wider block mb-1">
+                    Stroke width: {diagramStrokeWidth}
+                  </span>
+                  <input
+                    type="range"
+                    min="1"
+                    max="6"
+                    value={diagramStrokeWidth}
+                    onChange={(e) => setDiagramStrokeWidth(Number(e.target.value))}
+                    className="w-full h-1 accent-cad-highlight"
+                  />
+                </div>
+
+                {onShowDiagramSymbols && (
+                  <button
+                    onClick={onShowDiagramSymbols}
+                    className="w-full px-2 py-2 min-h-[44px] rounded-md text-xs font-medium bg-cad-accent/30 text-cad-text hover:bg-cad-accent/50 transition-colors"
+                  >
+                    BPMN Symbols…
+                  </button>
+                )}
+              </>
+            )}
           </div>
         )}
 

@@ -37,6 +37,7 @@ const CATEGORY_ORDER: Array<{ key: string; label: string }> = [
   { key: 'file',      label: 'File' },
   { key: 'block',     label: 'Block / Insert' },
   { key: 'landscape', label: 'Landscape (Netrun)' },
+  { key: 'diagram',   label: 'Diagram (BPMN / Flowchart)' },
 ];
 
 // ─── Searchable content index ─────────────────────────────────────────────────
@@ -53,13 +54,13 @@ const buildSearchIndex = (): Array<{ tab: HelpTab; text: string }> => {
   }
 
   // Static text — quick start
-  index.push({ tab: 'quickstart', text: 'quick start cad mode draw mode color mode text mode modes overview line rectangle circle dimension select scan blueprint compare deviation route mep' });
-  index.push({ tab: 'quickstart', text: 'save open project google drive how to upload scan import blueprint export report construction workflow' });
+  index.push({ tab: 'quickstart', text: 'quick start cad mode draw mode color mode text mode diagram mode modes overview line rectangle circle dimension select scan blueprint compare deviation route mep flowchart bpmn' });
+  index.push({ tab: 'quickstart', text: 'save open project google drive how to upload scan import blueprint export report construction workflow svg vector' });
 
   // Tools
-  index.push({ tab: 'tools', text: 'cad tools line rectangle circle dimension select draw mode pen brush watercolor marker color mode text font' });
+  index.push({ tab: 'tools', text: 'cad tools line rectangle circle dimension select draw mode pen brush watercolor marker color mode text font diagram box ellipse diamond connector swimlane container bpmn flowchart network router switch firewall server load balancer cloud aws azure gcp compute storage database queue function lambda mermaid graph icon glyph s3 ec2 dynamodb rds cosmos cloudfront route53 vpc iam kms cognito eventbridge step functions cloudwatch bedrock blob cosmosdb synapse bigquery firestore spanner pubsub vertex' });
   index.push({ tab: 'plants', text: 'plant database wucols water use vl l m h sun deer fire icon search place landscape' });
-  index.push({ tab: 'importexport', text: 'dxf import export pdf gis geojson kml satellite kiri scan obj ply google drive auto-save share' });
+  index.push({ tab: 'importexport', text: 'dxf import export pdf gis geojson kml satellite kiri scan obj ply google drive auto-save share svg vector inkscape illustrator mermaid graph td lr flowchart text round-trip clipboard' });
   index.push({ tab: 'about', text: 'netrun cad version built by netrun systems ojai california open source gplv2 mit github allie' });
 
   return index;
@@ -282,13 +283,14 @@ const QuickStartTab: React.FC<{ search: string }> = () => (
       <strong className="text-gray-300">Draw Routes</strong> — Switch to Route mode (type <KbdCell>RT</KbdCell>) to plan MEP routes with material cost estimation.
     </Step>
 
-    <SectionHeading>4 Modes Overview</SectionHeading>
+    <SectionHeading>5 Modes Overview</SectionHeading>
     <div className="space-y-2 mb-4">
       {[
         { icon: '📐', name: 'CAD Mode', key: '1', desc: 'Precise lines, rectangles, circles, dimensions. Snap-to-grid. Measured in feet.' },
         { icon: '✏️', name: 'Draw Mode', key: '2', desc: 'Apple Pencil freehand sketching — pressure-sensitive ink on top of CAD layers.' },
         { icon: '🎨', name: 'Color Mode', key: '3', desc: 'Watercolor and marker brushes. Press lightly for transparent washes.' },
         { icon: 'T', name: 'Text Mode', key: '4', desc: 'Place typed text or architect-style annotations anywhere on the plan.' },
+        { icon: '◆', name: 'Diagram Mode', key: '5', desc: 'Visio/Lucid-style flowcharts: shapes, sticky connectors, swimlanes, BPMN-lite symbols. Export as SVG.' },
       ].map((m) => (
         <div
           key={m.name}
@@ -309,7 +311,8 @@ const QuickStartTab: React.FC<{ search: string }> = () => (
     <SectionHeading>Keyboard Shortcuts</SectionHeading>
     <div className="space-y-1 mb-4">
       {[
-        ['V / L / R / C / D', 'Select / Line / Rect / Circle / Dim'],
+        ['1 / 2 / 3 / 4 / 5', 'CAD / Draw / Color / Text / Diagram modes'],
+        ['V / L / R / C / D', 'Select / Line / Rect / Circle / Dim (CAD mode)'],
         ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / Redo'],
         ['Esc', 'Cancel current operation'],
         ['F7 / G', 'Toggle grid'],
@@ -474,6 +477,31 @@ const ToolsTab: React.FC<{ search: string }> = () => (
     <SectionHeading>Text Mode</SectionHeading>
     <Para>Type in the text box at the top, then tap the canvas to place it. The text appears in architect-style handwriting font.</Para>
     <Para>Font size is fixed at 14pt canvas units (scales with zoom). Text sits on the Text layer and can be toggled on/off.</Para>
+
+    <SectionHeading>Diagram Mode (Visio / Lucidchart-style)</SectionHeading>
+    <Para>Press <KbdCell>5</KbdCell> or type <KbdCell>FLOW</KbdCell> to enter Diagram mode. Build flowcharts, swimlanes, and BPMN-lite process diagrams using the same canvas.</Para>
+    <div className="space-y-2 mb-4">
+      {[
+        { name: 'Box / Rounded / Ellipse / Diamond / Parallelogram / Cylinder / Hexagon', desc: 'Drag from one corner to the opposite to drop a flowchart shape. Double-click any shape to add or edit its label.' },
+        { name: 'Connector', desc: 'Click the source shape, then click the target shape. The connector sticks to both — when you drag a shape, the connector re-routes around it (orthogonal Manhattan routing). Auto-anchor picks the side facing the other shape.' },
+        { name: 'Swimlane H / V', desc: 'Drag out a swimlane container with horizontal or vertical lanes. Double-click the title bar to rename. Drop shapes inside to assign them to a lane.' },
+        { name: 'Group', desc: 'A simple titled container with no lane dividers. Useful for sub-process boundaries.' },
+        { name: 'Symbol Libraries', desc: 'Click "BPMN Symbols…" in the side panel for a tabbed browser with five libraries: Flowchart (Process, Decision, Start/End, Data, Document, Database, Manual Op), Network (Router, Switch, Firewall, Load Balancer, Wireless AP, NAT, Server, Workstation, Cloud, Internet, VPN Gateway, IDS/IPS), AWS (~35 services: EC2, Lambda, ECS, EKS, S3, EFS, Glacier, RDS, DynamoDB, Aurora, Redshift, CloudFront, Route 53, API Gateway, ALB/NLB, VPC, IAM, KMS, Secrets Manager, Cognito, WAF, SQS, SNS, EventBridge, Step Functions, Kinesis, Athena, CloudWatch, X-Ray, Bedrock), Azure (~30 services), and GCP (~30 services). Each cloud entry comes with a hand-crafted glyph icon overlay and vendor accent color. Search runs across all libraries.' },
+        { name: 'Vendor Icon Override', desc: 'Drop the official AWS / Azure / GCP icon archives into public/icons/{vendor}/ alongside a manifest.json — the icon loader picks them up at boot and replaces the bundled glyphs. See public/icons/README.md for the manifest schema and sourcing links. The bundled glyphs are not the official brand marks; they are visually distinctive geometric icons we own and can ship freely. The override path lets you add the real vendor marks once you accept their license.' },
+        { name: 'Mermaid Round-Trip', desc: 'Toolbar → Mermaid button. Paste mermaid graph/flowchart text → "Add to Canvas" auto-lays out the diagram with sticky connectors. Export tab shows the live mermaid representation of the current diagram, copy to clipboard. Supported: graph TD/TB/LR/RL/BT, all node shape forms ([], (), (()), {}, [()], {{}}, [/.../], [\\...\\]), edges (-->, -.->, ==>) with |labels|, and subgraph blocks (mapped to group containers).' },
+      ].map((t) => (
+        <div key={t.name} className="rounded p-2" style={{ background: '#1e1e2e' }}>
+          <div className="text-white text-xs font-medium mb-0.5">{t.name}</div>
+          <p className="text-gray-500 text-xs">{t.desc}</p>
+        </div>
+      ))}
+    </div>
+    <Para>
+      Diagram elements live on the dedicated <strong className="text-gray-300">Diagram</strong> and <strong className="text-gray-300">Connectors</strong> layers — toggle either off in the layer panel to focus on one without the other.
+    </Para>
+    <Para>
+      Use <strong className="text-gray-300">Export SVG</strong> in the toolbar for a vector file editable in Inkscape, Illustrator, or any browser. Diagram shapes export with full fidelity (text-in-shape, sticky connectors, swimlanes).
+    </Para>
   </div>
 );
 

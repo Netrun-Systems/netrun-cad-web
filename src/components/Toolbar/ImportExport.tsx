@@ -9,6 +9,8 @@ import { importDXF } from '../../engine/dxf-import';
 import { exportDXF } from '../../engine/dxf-export';
 import { exportToPDF, SCALE_OPTIONS, PAGE_SIZES } from '../../engine/pdf-export';
 import type { TitleBlockInfo, PDFExportOptions } from '../../engine/pdf-export';
+import { exportSVG } from '../../engine/svg-export';
+import { MermaidIOModal } from '../DiagramPanel/MermaidIOModal';
 import { GISImportModal } from './GISImportModal';
 import { ScanImportModal } from './ScanImportModal';
 import { SurvaiPanel } from '../SurvaiPanel/SurvaiPanel';
@@ -212,6 +214,7 @@ export const ImportExport: React.FC<ImportExportProps> = ({
   const [showGISModal, setShowGISModal] = useState(false);
   const [showScanModal, setShowScanModal] = useState(false);
   const [showSurvaiPanel, setShowSurvaiPanel] = useState(false);
+  const [showMermaidModal, setShowMermaidModal] = useState(false);
   const [importing, setImporting] = useState(false);
 
   // ── DXF Import ──────────────────────────────────────────────────────────────
@@ -252,6 +255,12 @@ export const ImportExport: React.FC<ImportExportProps> = ({
       view: { offsetX: 0, offsetY: 0, zoom: 1 },
     };
     exportDXF(state);
+  }, [elements, layers, grid]);
+
+  // ── SVG Export ──────────────────────────────────────────────────────────────
+
+  const handleExportSVG = useCallback(() => {
+    exportSVG(elements, layers, grid, { filename: 'drawing.svg', background: '#ffffff' });
   }, [elements, layers, grid]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -306,6 +315,31 @@ export const ImportExport: React.FC<ImportExportProps> = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
           </svg>
           Export PDF
+        </button>
+
+        {/* SVG Export */}
+        <button
+          onClick={handleExportSVG}
+          disabled={elements.length === 0}
+          title="Export as SVG (vector — editable in Inkscape, Illustrator, browser)"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-cad-surface/90 border border-cad-accent text-cad-text rounded-lg text-xs hover:bg-purple-700/30 hover:border-purple-500 transition-colors disabled:opacity-50"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          Export SVG
+        </button>
+
+        {/* Mermaid Import / Export */}
+        <button
+          onClick={() => setShowMermaidModal(true)}
+          title="Import or export Mermaid diagram (text)"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-cad-surface/90 border border-cad-accent text-cad-text rounded-lg text-xs hover:bg-pink-700/30 hover:border-pink-500 transition-colors"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h16M16 12l4 4m0 0l-4 4m4-4H4" />
+          </svg>
+          Mermaid
         </button>
 
         {/* Separator */}
@@ -391,6 +425,15 @@ export const ImportExport: React.FC<ImportExportProps> = ({
         <SurvaiPanel
           onImport={onImport}
           onClose={() => setShowSurvaiPanel(false)}
+        />
+      )}
+
+      {/* Mermaid import/export modal */}
+      {showMermaidModal && (
+        <MermaidIOModal
+          elements={elements}
+          onImport={(els) => onImport(els, [])}
+          onClose={() => setShowMermaidModal(false)}
         />
       )}
     </>

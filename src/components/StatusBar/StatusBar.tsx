@@ -1,9 +1,10 @@
 import React from 'react';
-import type { AppMode, CADTool, GridSettings, Layer } from '../../engine/types';
+import type { AppMode, CADTool, DiagramTool, GridSettings, Layer } from '../../engine/types';
 
 export interface StatusBarProps {
   mode: AppMode;
   cadTool: CADTool;
+  diagramTool?: DiagramTool;
   grid: GridSettings;
   layers: Layer[];
   activeLayerId: string;
@@ -21,6 +22,7 @@ export interface StatusBarProps {
 export const StatusBar: React.FC<StatusBarProps> = ({
   mode,
   cadTool,
+  diagramTool,
   grid,
   layers,
   activeLayerId,
@@ -73,6 +75,17 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             <span style={{ color: '#9ca3af' }}>
               TOOL&nbsp;
               <span style={{ color: '#ffffff' }}>{cadTool.toUpperCase()}</span>
+            </span>
+          </>
+        )}
+
+        {/* Diagram tool — only in diagram mode */}
+        {mode === 'diagram' && diagramTool && (
+          <>
+            <span style={{ color: '#555577' }}>|</span>
+            <span style={{ color: '#9ca3af' }}>
+              TOOL&nbsp;
+              <span style={{ color: '#ffffff' }}>{diagramTool.toUpperCase()}</span>
             </span>
           </>
         )}

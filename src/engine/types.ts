@@ -12,12 +12,40 @@ export interface StrokePoint extends Point {
   timestamp?: number;
 }
 
-export type AppMode = 'cad' | 'draw' | 'color' | 'text' | 'route';
+export type AppMode = 'cad' | 'draw' | 'color' | 'text' | 'route' | 'diagram';
 
 export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move' | 'route';
 
 export type DrawBrush = 'pen' | 'pencil' | 'marker';
 export type ColorBrush = 'watercolor' | 'marker' | 'fill';
+
+export type DiagramTool =
+  | 'select'
+  | 'box'
+  | 'rounded'
+  | 'ellipse'
+  | 'diamond'
+  | 'parallelogram'
+  | 'cylinder'
+  | 'hexagon'
+  | 'connector'
+  | 'swimlane-h'
+  | 'swimlane-v'
+  | 'group';
+
+export type FlowchartShapeKind =
+  | 'rectangle'
+  | 'rounded'
+  | 'ellipse'
+  | 'diamond'
+  | 'parallelogram'
+  | 'cylinder'
+  | 'hexagon';
+
+export type ConnectorAnchor = 'top' | 'right' | 'bottom' | 'left' | 'auto';
+export type ConnectorRouting = 'orthogonal' | 'straight' | 'bezier';
+export type ConnectorCap = 'none' | 'arrow' | 'dot';
+export type ContainerKind = 'group' | 'swimlane-h' | 'swimlane-v';
 
 /** Optional rendering metadata for special elements (e.g. neighbor parcels, interior symbols) */
 export interface ElementMetadata {
@@ -128,6 +156,71 @@ export interface InteriorSymbolPlacement {
   color?: string;
 }
 
+/** Flowchart / diagram shape with optional text inside. Origin is top-left of bounding box. */
+export interface FlowchartShape {
+  type: 'flowchart-shape';
+  id: string;
+  shape: FlowchartShapeKind;
+  origin: Point;
+  width: number;
+  height: number;
+  layerId: string;
+  fillColor: string;
+  strokeColor: string;
+  strokeWidth: number;
+  text?: string;
+  textColor?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  rotation?: number;
+  /** Optional icon overlay (key into the diagram-icons registry, e.g. 'aws.lambda'). Renders top-left or centered depending on shape. */
+  iconRef?: string;
+  /** Override the icon's default fill color. */
+  iconColor?: string;
+  /** Icon size in canvas units. Default: 24 (matches the 24x24 glyph viewBox). */
+  iconSize?: number;
+  metadata?: ElementMetadata;
+}
+
+/** Sticky connector between two shapes. Path is recomputed when endpoints move. */
+export interface Connector {
+  type: 'connector';
+  id: string;
+  fromShapeId: string;
+  toShapeId: string;
+  fromAnchor?: ConnectorAnchor;
+  toAnchor?: ConnectorAnchor;
+  routing: ConnectorRouting;
+  layerId: string;
+  strokeColor: string;
+  strokeWidth: number;
+  startCap?: ConnectorCap;
+  endCap?: ConnectorCap;
+  label?: string;
+  /** Cached routed path; cleared when an endpoint shape moves. */
+  cachedPath?: Point[];
+  metadata?: ElementMetadata;
+}
+
+/** Container / swimlane. Children are tracked by id for soft membership; positions stay absolute. */
+export interface DiagramContainer {
+  type: 'container';
+  id: string;
+  origin: Point;
+  width: number;
+  height: number;
+  layerId: string;
+  fillColor?: string;
+  strokeColor: string;
+  strokeWidth: number;
+  title?: string;
+  containerType: ContainerKind;
+  laneCount?: number;
+  laneLabels?: string[];
+  childIds?: string[];
+  metadata?: ElementMetadata;
+}
+
 export type CADElement =
   | CADLine
   | CADRectangle
@@ -136,7 +229,10 @@ export type CADElement =
   | FreehandStroke
   | TextElement
   | PlantPlacement
-  | InteriorSymbolPlacement;
+  | InteriorSymbolPlacement
+  | FlowchartShape
+  | Connector
+  | DiagramContainer;
 
 export interface Layer {
   id: string;
@@ -189,6 +285,8 @@ export const DEFAULT_LAYERS: Layer[] = [
   { id: 'plumbing-route', name: 'Plumbing Route', visible: true, locked: false, opacity: 1, color: '#3b82f6', order: 10 },
   { id: 'hvac-route', name: 'HVAC Route', visible: true, locked: false, opacity: 1, color: '#06b6d4', order: 11 },
   { id: 'low-voltage-route', name: 'Low Voltage Route', visible: true, locked: false, opacity: 1, color: '#8b5cf6', order: 12 },
+  { id: 'diagram', name: 'Diagram', visible: true, locked: false, opacity: 1, color: '#1f2937', order: 13 },
+  { id: 'connectors', name: 'Connectors', visible: true, locked: false, opacity: 1, color: '#374151', order: 14 },
 ];
 
 export const DEFAULT_GRID: GridSettings = {

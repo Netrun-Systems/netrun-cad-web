@@ -11,6 +11,7 @@ const MODES: { key: AppMode; label: string; shortcut: string; icon: string }[] =
   { key: 'draw', label: 'Draw', shortcut: '2', icon: '✏️' },
   { key: 'color', label: 'Color', shortcut: '3', icon: '🎨' },
   { key: 'text', label: 'Text', shortcut: '4', icon: '𝐀' },
+  { key: 'diagram', label: 'Diagram', shortcut: '5', icon: '◆' },
 ];
 
 export const ModeToolbar: React.FC<ModeToolbarProps> = ({ mode, setMode }) => {

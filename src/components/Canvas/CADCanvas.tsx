@@ -3,6 +3,7 @@ import getStroke from 'perfect-freehand';
 import type {
   AppMode,
   CADTool,
+  DiagramTool,
   CADElement,
   Point,
   StrokePoint,
@@ -19,6 +20,11 @@ import { usePointerEvents } from './usePointerEvents';
 import { useZoomPan } from './useZoomPan';
 import { useCADTools } from './useCADTools';
 import { useDrawingTools } from './useDrawingTools';
+import { useDiagramTools } from './useDiagramTools';
+import { routeConnector, reRouteConnectors } from '../../engine/connector-router';
+import { DiagramSymbolBrowser } from '../DiagramPanel/DiagramSymbolBrowser';
+import type { DiagramSymbol } from '../../data/diagram-symbols';
+import type { FlowchartShape } from '../../engine/types';
 import {
   computeInferenceLines,
   findSnapIndicator,
@@ -117,6 +123,40 @@ export const CADCanvas: React.FC = () => {
 
   // Text mode
   const [textInput, setTextInput] = useState('');
+
+  // Diagram mode
+  const [diagramTool, setDiagramTool] = useState<DiagramTool>('box');
+  const [diagramFillColor, setDiagramFillColor] = useState('#dbeafe');
+  const [diagramStrokeColor, setDiagramStrokeColor] = useState('#1e3a8a');
+  const [diagramStrokeWidth, setDiagramStrokeWidth] = useState(2);
+  const [showDiagramSymbols, setShowDiagramSymbols] = useState(false);
+
+  // Place a diagram symbol at the visible canvas center (used by DiagramSymbolBrowser)
+  const handlePlaceDiagramSymbol = useCallback((sym: DiagramSymbol) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const cx = (rect.width / 2 - view.offsetX) / view.zoom;
+    const cy = (rect.height / 2 - view.offsetY) / view.zoom;
+    const shape: FlowchartShape = {
+      type: 'flowchart-shape',
+      id: `shape-${Date.now()}`,
+      shape: sym.shape,
+      origin: { x: cx - sym.defaultWidth / 2, y: cy - sym.defaultHeight / 2 },
+      width: sym.defaultWidth,
+      height: sym.defaultHeight,
+      layerId: 'diagram',
+      fillColor: sym.defaultFill ?? diagramFillColor,
+      strokeColor: diagramStrokeColor,
+      strokeWidth: diagramStrokeWidth,
+      text: sym.label,
+      textColor: '#0f172a',
+      iconRef: sym.iconRef,
+      iconColor: sym.iconColor,
+      metadata: sym.bpmnRole ? { interiorSymbol: sym.bpmnRole } : undefined,
+    };
+    addElement(shape);
+  }, [view, diagramFillColor, diagramStrokeColor, diagramStrokeWidth]);
 
   // Plant placement
   const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null);
@@ -293,6 +333,7 @@ export const CADCanvas: React.FC = () => {
       case 'draw': return 'drawing';
       case 'color': return 'color';
       case 'text': return 'text';
+      case 'diagram': return 'diagram';
       default: return activeLayerId;
     }
   }, [mode, activeLayerId]);
@@ -439,9 +480,22 @@ export const CADCanvas: React.FC = () => {
           break;
 
         // Modes
-        case 'mode:text':   setMode('text');  break;
-        case 'mode:draw':   setMode('draw');  break;
-        case 'mode:color':  setMode('color'); break;
+        case 'mode:text':    setMode('text');    break;
+        case 'mode:draw':    setMode('draw');    break;
+        case 'mode:color':   setMode('color');   break;
+        case 'mode:diagram': setMode('diagram'); break;
+        case 'tool:diagram:box':           setMode('diagram'); setDiagramTool('box');           break;
+        case 'tool:diagram:rounded':       setMode('diagram'); setDiagramTool('rounded');       break;
+        case 'tool:diagram:ellipse':       setMode('diagram'); setDiagramTool('ellipse');       break;
+        case 'tool:diagram:diamond':       setMode('diagram'); setDiagramTool('diamond');       break;
+        case 'tool:diagram:parallelogram': setMode('diagram'); setDiagramTool('parallelogram'); break;
+        case 'tool:diagram:cylinder':      setMode('diagram'); setDiagramTool('cylinder');      break;
+        case 'tool:diagram:hexagon':       setMode('diagram'); setDiagramTool('hexagon');       break;
+        case 'tool:diagram:connector':     setMode('diagram'); setDiagramTool('connector');     break;
+        case 'tool:diagram:swimlane-h':    setMode('diagram'); setDiagramTool('swimlane-h');    break;
+        case 'tool:diagram:swimlane-v':    setMode('diagram'); setDiagramTool('swimlane-v');    break;
+        case 'tool:diagram:group':         setMode('diagram'); setDiagramTool('group');         break;
+        case 'tool:diagram:select':        setMode('diagram'); setDiagramTool('select');        break;
         case 'setRouteMode':
         case 'mode:route':
           setMode('route');
@@ -699,6 +753,23 @@ export const CADCanvas: React.FC = () => {
     onLiveStroke: setLiveStrokePoints,
   });
 
+  // Diagram tools
+  const [pendingConnectorFromId, setPendingConnectorFromId] = useState<string | null>(null);
+  const { handleDiagramDown, handleDiagramMove, handleDiagramUp, cancelPendingConnector } = useDiagramTools({
+    activeTool: diagramTool,
+    activeLayerId: getActiveLayer(),
+    grid,
+    fillColor: diagramFillColor,
+    strokeColor: diagramStrokeColor,
+    strokeWidth: diagramStrokeWidth,
+    connectorRouting: 'orthogonal',
+    elements,
+    onElementCreated: addElement,
+    onPreviewChange: setPreview,
+    onPendingConnectorChange: setPendingConnectorFromId,
+    routeConnector,
+  });
+
   // Zoom/pan
   const { handleWheel, startPan, movePan, endPan, resetView } = useZoomPan({
     view,
@@ -740,6 +811,24 @@ export const CADCanvas: React.FC = () => {
           lastPointRef.current = point;
           handleCADDown(point);
         }
+      } else if (mode === 'diagram') {
+        if (diagramTool === 'select') {
+          const hit = findElementAt(elements, point, view.zoom);
+          if (hit) {
+            setSelectedElementId(hit.id);
+            dragStartRef.current = { x: point.x, y: point.y };
+            const bb = getBoundingBox(hit);
+            dragElementStartRef.current = { x: bb.x, y: bb.y };
+          } else {
+            setSelectedElementId(null);
+            isPanningRef.current = true;
+            const canvas = canvasRef.current!;
+            const rect = canvas.getBoundingClientRect();
+            startPan(point.x * view.zoom + view.offsetX + rect.left, point.y * view.zoom + view.offsetY + rect.top);
+          }
+        } else {
+          handleDiagramDown(point);
+        }
       } else if (mode === 'draw' || mode === 'color') {
         handleDrawStart(point);
       } else if (mode === 'text') {
@@ -759,7 +848,7 @@ export const CADCanvas: React.FC = () => {
         }
       }
     },
-    [mode, cadTool, handleCADDown, handleDrawStart, startPan, view, textInput, penColor, addElement]
+    [mode, cadTool, diagramTool, handleCADDown, handleDiagramDown, handleDrawStart, startPan, view, textInput, penColor, addElement, elements]
   );
 
   const onStrokeMove = useCallback(
@@ -769,16 +858,25 @@ export const CADCanvas: React.FC = () => {
       setCursorX(point.x);
       setCursorY(point.y);
 
-      if (selectedElementId && dragStartRef.current && cadTool === 'select') {
-        // Drag the selected element
-        const dx = point.x - dragStartRef.current.x;
-        const dy = point.y - dragStartRef.current.y;
+      const isSelectDrag = dragStartRef.current && (
+        (mode === 'cad' && cadTool === 'select') ||
+        (mode === 'diagram' && diagramTool === 'select')
+      );
+
+      if (selectedElementId && isSelectDrag) {
+        const dx = point.x - dragStartRef.current!.x;
+        const dy = point.y - dragStartRef.current!.y;
         if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
-          setElements((prev) =>
-            prev.map((el) =>
+          setElements((prev) => {
+            const next = prev.map((el) =>
               el.id === selectedElementId ? moveElement(el, dx, dy) : el
-            )
-          );
+            );
+            // If a flowchart shape moved, re-route any connectors attached to it
+            if (mode === 'diagram') {
+              return reRouteConnectors(next, new Set([selectedElementId]));
+            }
+            return next;
+          });
           dragStartRef.current = { x: point.x, y: point.y };
         }
       } else if (isPanningRef.current) {
@@ -787,14 +885,16 @@ export const CADCanvas: React.FC = () => {
         movePan(point.x * view.zoom + view.offsetX + rect.left, point.y * view.zoom + view.offsetY + rect.top);
       } else if (mode === 'cad') {
         handleCADMove(point);
+      } else if (mode === 'diagram') {
+        handleDiagramMove(point);
       } else if (mode === 'draw' || mode === 'color') {
         handleDrawMove(point);
       }
     },
-    [mode, handleCADMove, handleDrawMove, movePan, view, isPanningRef]
+    [mode, cadTool, diagramTool, selectedElementId, handleCADMove, handleDiagramMove, handleDrawMove, movePan, view, isPanningRef]
   );
 
-  const onStrokeEnd = useCallback(() => {
+  const onStrokeEnd = useCallback((point?: StrokePoint) => {
     dragStartRef.current = null;
     dragElementStartRef.current = null;
     if (isPanningRef.current) {
@@ -803,10 +903,12 @@ export const CADCanvas: React.FC = () => {
     } else if (mode === 'cad') {
       handleCADUp();
       lastPointRef.current = null;
+    } else if (mode === 'diagram') {
+      handleDiagramUp(point ?? lastPointRef.current ?? { x: 0, y: 0 });
     } else if (mode === 'draw' || mode === 'color') {
       handleDrawEnd();
     }
-  }, [mode, handleCADUp, handleDrawEnd, endPan]);
+  }, [mode, handleCADUp, handleDiagramUp, handleDrawEnd, endPan]);
 
   // Pointer events hook
   const { handlePointerDown: ptrDown, handlePointerMove: ptrMove, handlePointerUp: ptrUp } =
@@ -971,13 +1073,40 @@ export const CADCanvas: React.FC = () => {
         return;
       }
 
+      const canvas = canvasRef.current!;
+      const rect = canvas.getBoundingClientRect();
+      const worldX = (e.clientX - rect.left - view.offsetX) / view.zoom;
+      const worldY = (e.clientY - rect.top - view.offsetY) / view.zoom;
+
+      // Diagram mode: double-click flowchart shape or container to edit text/title
+      if (mode === 'diagram') {
+        for (let i = elements.length - 1; i >= 0; i--) {
+          const el = elements[i];
+          if (el.type === 'flowchart-shape' &&
+              worldX >= el.origin.x && worldX <= el.origin.x + el.width &&
+              worldY >= el.origin.y && worldY <= el.origin.y + el.height) {
+            setEditingTextId(el.id);
+            setEditingTextValue(el.text ?? '');
+            const screenX = (el.origin.x + el.width / 2) * view.zoom + view.offsetX + rect.left - 60;
+            const screenY = (el.origin.y + el.height / 2) * view.zoom + view.offsetY + rect.top - 12;
+            setEditingTextPos({ x: screenX, y: screenY });
+            return;
+          }
+          if (el.type === 'container' &&
+              worldX >= el.origin.x && worldX <= el.origin.x + el.width &&
+              worldY >= el.origin.y && worldY <= el.origin.y + Math.min(24, el.height)) {
+            setEditingTextId(el.id);
+            setEditingTextValue(el.title ?? '');
+            const screenX = el.origin.x * view.zoom + view.offsetX + rect.left + 8;
+            const screenY = el.origin.y * view.zoom + view.offsetY + rect.top + 4;
+            setEditingTextPos({ x: screenX, y: screenY });
+            return;
+          }
+        }
+      }
+
       // Left double-click in select mode → edit text element
       if (mode === 'cad' && cadTool === 'select') {
-        const canvas = canvasRef.current!;
-        const rect = canvas.getBoundingClientRect();
-        const worldX = (e.clientX - rect.left - view.offsetX) / view.zoom;
-        const worldY = (e.clientY - rect.top - view.offsetY) / view.zoom;
-
         // Hit-test text elements (reverse order for top-most)
         for (let i = elements.length - 1; i >= 0; i--) {
           const el = elements[i];
@@ -1001,14 +1130,22 @@ export const CADCanvas: React.FC = () => {
     [mode, cadTool, elements, view, resetView]
   );
 
-  // Handle text edit commit
+  // Handle text edit commit (text element, flowchart-shape text, or container title)
   const commitTextEdit = useCallback(() => {
-    if (editingTextId && editingTextValue.trim()) {
-      setElements((prev) => prev.map((el) =>
-        el.id === editingTextId && el.type === 'text'
-          ? { ...el, content: editingTextValue }
-          : el
-      ));
+    if (editingTextId) {
+      setElements((prev) => prev.map((el) => {
+        if (el.id !== editingTextId) return el;
+        if (el.type === 'text' && editingTextValue.trim()) {
+          return { ...el, content: editingTextValue };
+        }
+        if (el.type === 'flowchart-shape') {
+          return { ...el, text: editingTextValue };
+        }
+        if (el.type === 'container') {
+          return { ...el, title: editingTextValue };
+        }
+        return el;
+      }));
     }
     setEditingTextId(null);
     setEditingTextValue('');
@@ -1058,6 +1195,10 @@ export const CADCanvas: React.FC = () => {
           cancelPending();
           setCmdFocused(false);
           setCmdPrompt('Command:');
+        } else if (mode === 'diagram' && pendingConnectorFromId) {
+          cancelPendingConnector();
+          setCmdFocused(false);
+          setCmdPrompt('Command:');
         } else if (timeSinceLastEsc < 500) {
           // Second Esc within 500ms: switch to Select tool
           setCadTool('select');
@@ -1100,10 +1241,11 @@ export const CADCanvas: React.FC = () => {
       }
 
       // ── Mode shortcuts 1-4 ───────────────────────────────────────────────
-      if (e.key === '1') { setMode('cad');   return; }
-      if (e.key === '2') { setMode('draw');  return; }
-      if (e.key === '3') { setMode('color'); return; }
-      if (e.key === '4') { setMode('text');  return; }
+      if (e.key === '1') { setMode('cad');     return; }
+      if (e.key === '2') { setMode('draw');    return; }
+      if (e.key === '3') { setMode('color');   return; }
+      if (e.key === '4') { setMode('text');    return; }
+      if (e.key === '5') { setMode('diagram'); return; }
 
       // ── CAD tool shortcuts (single keys, only in cad mode) ────────────────
       if (mode === 'cad') {
@@ -1609,6 +1751,15 @@ export const CADCanvas: React.FC = () => {
         setColorOpacity={setColorOpacity}
         textInput={textInput}
         setTextInput={setTextInput}
+        diagramTool={diagramTool}
+        setDiagramTool={setDiagramTool}
+        diagramFillColor={diagramFillColor}
+        setDiagramFillColor={setDiagramFillColor}
+        diagramStrokeColor={diagramStrokeColor}
+        setDiagramStrokeColor={setDiagramStrokeColor}
+        diagramStrokeWidth={diagramStrokeWidth}
+        setDiagramStrokeWidth={setDiagramStrokeWidth}
+        onShowDiagramSymbols={() => setShowDiagramSymbols((s) => !s)}
         layers={layers}
         activeLayerId={activeLayerId}
         onSelectLayer={setActiveLayerId}
@@ -1953,6 +2104,7 @@ export const CADCanvas: React.FC = () => {
           <StatusBar
             mode={mode}
             cadTool={cadTool}
+            diagramTool={diagramTool}
             grid={grid}
             layers={layers}
             activeLayerId={getActiveLayer()}
@@ -1966,6 +2118,14 @@ export const CADCanvas: React.FC = () => {
             onResetView={resetView}
           />
         </div>
+      )}
+
+      {/* Diagram symbol browser */}
+      {showDiagramSymbols && mode === 'diagram' && (
+        <DiagramSymbolBrowser
+          onPlaceSymbol={handlePlaceDiagramSymbol}
+          onClose={() => setShowDiagramSymbols(false)}
+        />
       )}
 
       {/* Inline text editor (double-click to edit) */}
