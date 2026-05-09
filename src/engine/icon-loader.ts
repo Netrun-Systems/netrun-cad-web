@@ -43,6 +43,11 @@ interface LoadResult {
 
 const FETCH_DEFAULTS: RequestInit = { credentials: 'same-origin', cache: 'force-cache' };
 
+function looksLikeJson(contentType: string | null, body: string): boolean {
+  if (contentType && /\bjson\b/i.test(contentType)) return true;
+  return body.trimStart().startsWith('{');
+}
+
 /**
  * Fetch the manifest at /icons/manifest.json, then fetch each listed SVG and
  * register it as an icon override. Idempotent — re-running pulls fresh copies.
@@ -55,7 +60,14 @@ export async function loadIconManifest(baseUrl = '/icons'): Promise<LoadResult> 
   try {
     const res = await fetch(manifestUrl, FETCH_DEFAULTS);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    manifest = await res.json();
+    // Guard against SPA catch-all that returns index.html with HTTP 200 for
+    // any unmatched path. Validate that we actually got JSON before parsing.
+    const contentType = res.headers.get('content-type');
+    const body = await res.text();
+    if (!looksLikeJson(contentType, body)) {
+      throw new Error('not JSON (SPA fallback or wrong content-type)');
+    }
+    manifest = JSON.parse(body);
   } catch (e) {
     return { loaded: 0, failed: [{ id: '__manifest__', reason: (e as Error).message }] };
   }
@@ -142,6 +154,10 @@ export async function tryAutoLoadIcons(baseUrl = '/icons'): Promise<LoadResult |
   try {
     const head = await fetch(`${baseUrl}/manifest.json`, { ...FETCH_DEFAULTS, method: 'HEAD' });
     if (!head.ok) return null;
+    // SPA catch-all servers (e.g. nginx try_files ... /index.html) return 200
+    // for any path. Only proceed if the content-type clearly indicates JSON.
+    const contentType = head.headers.get('content-type');
+    if (!contentType || !/\bjson\b/i.test(contentType)) return null;
   } catch {
     return null;
   }
