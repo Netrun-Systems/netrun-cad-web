@@ -9,3 +9,6 @@ dist/
 .env.production
 .env.local
 .env*.local
+
+# Local agent state — not for the repo
+.claude/

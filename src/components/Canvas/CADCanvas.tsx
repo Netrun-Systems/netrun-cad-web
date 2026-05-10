@@ -587,7 +587,6 @@ export const CADCanvas: React.FC = () => {
 
         // Landscape
         case 'panel:plants':    setShowPlantPanel((s) => !s); break;
-        case 'panel:survai':    setShowSurvaiPanel((s) => !s); break;
         case 'basemap:toggle':  setBasemap((b) => ({ ...b, enabled: !b.enabled })); break;
         case 'file:scan':       /* handled by ImportExport */ break;
         case 'file:gis':        /* handled by ImportExport */ break;
