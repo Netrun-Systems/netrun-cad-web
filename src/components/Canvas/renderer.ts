@@ -199,6 +199,91 @@ function renderEllipse(ctx: CanvasRenderingContext2D, el: CADEllipse) {
 }
 
 function renderDimension(ctx: CanvasRenderingContext2D, el: CADDimension, grid: GridSettings) {
+  const style = el.dimStyle ?? 'linear';
+
+  ctx.save();
+  ctx.strokeStyle = '#ff9800';
+  ctx.fillStyle = '#ff9800';
+  ctx.lineWidth = 1;
+  ctx.font = '12px monospace';
+
+  if (style === 'angular') {
+    const vtx = el.p3 ?? el.p1;
+    const a1 = angle(vtx, el.p1);
+    const a2 = angle(vtx, el.p2);
+    const r = el.offset;
+    // Sweep CCW from a1 to a2 the short way around
+    let span = a2 - a1;
+    while (span > Math.PI) span -= 2 * Math.PI;
+    while (span < -Math.PI) span += 2 * Math.PI;
+    // Extension ticks along each ray at the arc radius
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(vtx.x, vtx.y);
+    ctx.lineTo(vtx.x + Math.cos(a1) * (r + 8), vtx.y + Math.sin(a1) * (r + 8));
+    ctx.moveTo(vtx.x, vtx.y);
+    ctx.lineTo(vtx.x + Math.cos(a2) * (r + 8), vtx.y + Math.sin(a2) * (r + 8));
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // The arc
+    ctx.beginPath();
+    ctx.arc(vtx.x, vtx.y, r, a1, a1 + span, span < 0);
+    ctx.stroke();
+    // Label at arc midpoint
+    const midA = a1 + span / 2;
+    const lx = vtx.x + Math.cos(midA) * (r + 12);
+    const ly = vtx.y + Math.sin(midA) * (r + 12);
+    const deg = Math.abs((span * 180) / Math.PI);
+    const label = el.label || `${deg.toFixed(1)}°`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, lx, ly);
+    ctx.restore();
+    return;
+  }
+
+  if (style === 'radius' || style === 'diameter') {
+    const r = distance(el.p1, el.p2); // radius
+    const a = angle(el.p1, el.p2);
+    // Leader from the point on the circle outward by `offset`
+    const lx = el.p2.x + Math.cos(a) * el.offset;
+    const ly = el.p2.y + Math.sin(a) * el.offset;
+    // Short horizontal tail for the label
+    const horiz = Math.cos(a) >= 0 ? 24 : -24;
+    const tx = lx + horiz;
+    const ty = ly;
+    ctx.beginPath();
+    if (style === 'diameter') {
+      // Draw diameter line through the circle (both ends)
+      const opp = { x: el.p1.x - Math.cos(a) * r, y: el.p1.y - Math.sin(a) * r };
+      ctx.moveTo(opp.x, opp.y);
+      ctx.lineTo(el.p2.x, el.p2.y);
+    } else {
+      // Radius leader: from center to point on circle
+      ctx.moveTo(el.p1.x, el.p1.y);
+      ctx.lineTo(el.p2.x, el.p2.y);
+    }
+    ctx.lineTo(lx, ly);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    // Arrow tip at p2 (pointing outward along leader)
+    drawArrow(ctx, lx, ly, el.p2.x, el.p2.y);
+    // Label
+    const value = style === 'radius' ? r : r * 2;
+    const prefix = style === 'radius' ? 'R ' : 'Ø ';
+    const label = el.label || prefix + formatMeasurement(value, grid);
+    ctx.textAlign = horiz > 0 ? 'left' : 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, tx + (horiz > 0 ? 2 : -2), ty);
+    ctx.restore();
+    return;
+  }
+
+  // Linear + aligned: chord-parallel dim line offset perpendicular.
+  // (In this renderer both styles look the same — chord-parallel placement.
+  // A future enhancement could project 'linear' to horizontal/vertical axes;
+  // for now the visual is consistent and the data still distinguishes the
+  // two styles for downstream export.)
   const dist = distance(el.p1, el.p2);
   const ang = angle(el.p1, el.p2);
   const perpAngle = ang + Math.PI / 2;
@@ -208,9 +293,6 @@ function renderDimension(ctx: CanvasRenderingContext2D, el: CADDimension, grid: 
   const dp1 = { x: el.p1.x + ox, y: el.p1.y + oy };
   const dp2 = { x: el.p2.x + ox, y: el.p2.y + oy };
 
-  ctx.save();
-  ctx.strokeStyle = '#ff9800';
-  ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
 
   // Extension lines
@@ -231,11 +313,29 @@ function renderDimension(ctx: CanvasRenderingContext2D, el: CADDimension, grid: 
   // Label
   const mid = midpoint(dp1, dp2);
   const label = el.label || formatMeasurement(dist, grid);
-  ctx.fillStyle = '#ff9800';
-  ctx.font = '12px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
   ctx.fillText(label, mid.x, mid.y - 4);
+  ctx.restore();
+}
+
+/** Tiny arrowhead helper used by radius/diameter dimension. */
+function drawArrow(
+  ctx: CanvasRenderingContext2D,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+) {
+  const a = Math.atan2(toY - fromY, toX - fromX);
+  const size = 6;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(toX, toY);
+  ctx.lineTo(toX - size * Math.cos(a - Math.PI / 6), toY - size * Math.sin(a - Math.PI / 6));
+  ctx.lineTo(toX - size * Math.cos(a + Math.PI / 6), toY - size * Math.sin(a + Math.PI / 6));
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 }
 

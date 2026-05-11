@@ -110,6 +110,14 @@ export function useCADTools({
   const arcStartRef = useRef<Point | null>(null);
   const arcEndRef = useRef<Point | null>(null);
 
+  // Advanced dimension tools share a small state machine. Phase tracks
+  // how many clicks have been captured for the active dim flow.
+  //   aligned/angular: 3 clicks
+  //   radius/diameter: 2 clicks
+  const dimAdvPhaseRef = useRef(0);
+  const dimAdvA = useRef<Point | null>(null);
+  const dimAdvB = useRef<Point | null>(null);
+
   /**
    * Build an arc from three points: start, end, and a hint point that
    * lies on the desired arc (determines the sweep direction). Returns
@@ -241,6 +249,126 @@ export function useCADTools({
           return;
         }
 
+        return;
+      }
+
+      // ─── Aligned dimension: 3 clicks (p1, p2, offset point) ────
+      if (activeTool === 'dim-aligned') {
+        const phase = dimAdvPhaseRef.current;
+        if (phase === 0) {
+          dimAdvA.current = point;
+          dimAdvPhaseRef.current = 1;
+          setPendingInput({ tool: 'dim-aligned', startPoint: point, phase: 1, prompt: 'Specify second measurement point:' });
+          return;
+        }
+        if (phase === 1) {
+          dimAdvB.current = point;
+          dimAdvPhaseRef.current = 2;
+          setPendingInput({ tool: 'dim-aligned', startPoint: dimAdvA.current!, secondPoint: point, phase: 2, prompt: 'Specify dimension line offset:' });
+          return;
+        }
+        if (phase === 2) {
+          const p1 = dimAdvA.current!;
+          const p2 = dimAdvB.current!;
+          const ang = angle(p1, p2);
+          const perp = ang + Math.PI / 2;
+          const dx = point.x - p1.x;
+          const dy = point.y - p1.y;
+          const offset = dx * Math.cos(perp) + dy * Math.sin(perp);
+          const el: CADDimension = {
+            type: 'dimension',
+            dimStyle: 'aligned',
+            id: genId('dim-aligned'),
+            p1, p2,
+            offset: Math.abs(offset) < 15 ? (offset < 0 ? -15 : 15) : offset,
+            layerId: activeLayerId,
+          };
+          onElementCreated(el);
+          dimAdvPhaseRef.current = 0;
+          dimAdvA.current = null;
+          dimAdvB.current = null;
+          setPendingInput(null);
+          onPreviewChange(null);
+          return;
+        }
+        return;
+      }
+
+      // ─── Angular dimension: 3 clicks (ray-1 end, vertex, ray-2 end) ────
+      if (activeTool === 'dim-angular') {
+        const phase = dimAdvPhaseRef.current;
+        if (phase === 0) {
+          dimAdvA.current = point;
+          dimAdvPhaseRef.current = 1;
+          setPendingInput({ tool: 'dim-angular', startPoint: point, phase: 1, prompt: 'Specify the angle vertex:' });
+          return;
+        }
+        if (phase === 1) {
+          dimAdvB.current = point;
+          dimAdvPhaseRef.current = 2;
+          setPendingInput({ tool: 'dim-angular', startPoint: dimAdvA.current!, secondPoint: point, phase: 2, prompt: 'Specify the second ray endpoint:' });
+          return;
+        }
+        if (phase === 2) {
+          const a = dimAdvA.current!;
+          const vtx = dimAdvB.current!;
+          const b = point;
+          const ra = Math.hypot(a.x - vtx.x, a.y - vtx.y);
+          const rb = Math.hypot(b.x - vtx.x, b.y - vtx.y);
+          const offset = Math.max(20, Math.min(ra, rb) * 0.7);
+          const el: CADDimension = {
+            type: 'dimension',
+            dimStyle: 'angular',
+            id: genId('dim-angular'),
+            p1: a,
+            p2: b,
+            p3: vtx,
+            offset,
+            layerId: activeLayerId,
+          };
+          onElementCreated(el);
+          dimAdvPhaseRef.current = 0;
+          dimAdvA.current = null;
+          dimAdvB.current = null;
+          setPendingInput(null);
+          onPreviewChange(null);
+          return;
+        }
+        return;
+      }
+
+      // ─── Radius / Diameter dimension: 2 clicks (center, point on circle) ────
+      if (activeTool === 'dim-radius' || activeTool === 'dim-diameter') {
+        const phase = dimAdvPhaseRef.current;
+        if (phase === 0) {
+          dimAdvA.current = point;
+          dimAdvPhaseRef.current = 1;
+          setPendingInput({
+            tool: activeTool,
+            startPoint: point,
+            phase: 1,
+            prompt: activeTool === 'dim-radius' ? 'Specify a point on the circle (sets radius):' : 'Specify a point on the circle (sets diameter):',
+          });
+          return;
+        }
+        if (phase === 1) {
+          const center = dimAdvA.current!;
+          const el: CADDimension = {
+            type: 'dimension',
+            dimStyle: activeTool === 'dim-radius' ? 'radius' : 'diameter',
+            id: genId(activeTool),
+            p1: center,
+            p2: point,
+            offset: 20,
+            layerId: activeLayerId,
+          };
+          onElementCreated(el);
+          dimAdvPhaseRef.current = 0;
+          dimAdvA.current = null;
+          setPendingInput(null);
+          onPreviewChange(null);
+          return;
+        }
         return;
       }
 
@@ -728,6 +856,9 @@ export function useCADTools({
     arcPhaseRef.current = 0;
     arcStartRef.current = null;
     arcEndRef.current = null;
+    dimAdvPhaseRef.current = 0;
+    dimAdvA.current = null;
+    dimAdvB.current = null;
     setPendingInput(null);
     onPreviewChange(null);
   }, [onPreviewChange]);

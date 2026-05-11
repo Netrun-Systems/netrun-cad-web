@@ -157,11 +157,24 @@ function renderElementBody(
         </>
       );
 
-    case 'dimension':
+    case 'dimension': {
+      const style = element.dimStyle ?? 'linear';
       return (
         <>
+          <SizeReadout label="Style" value={style.charAt(0).toUpperCase() + style.slice(1)} />
           <PositionReadout x={element.p1.x} y={element.p1.y} />
-          <PositionReadout x={element.p2.x} y={element.p2.y} />
+          {style !== 'radius' && style !== 'diameter' && (
+            <PositionReadout x={element.p2.x} y={element.p2.y} />
+          )}
+          {style === 'angular' && element.p3 && (
+            <SizeReadout label="Vertex" value={`${toFt(element.p3.x)}, ${toFt(element.p3.y)}`} />
+          )}
+          {(style === 'radius' || style === 'diameter') && (
+            <SizeReadout
+              label={style === 'radius' ? 'R' : 'Ø'}
+              value={`${toFt(style === 'radius' ? Math.hypot(element.p2.x - element.p1.x, element.p2.y - element.p1.y) : 2 * Math.hypot(element.p2.x - element.p1.x, element.p2.y - element.p1.y))} FT`}
+            />
+          )}
           <FieldRow label="Offset">
             <NumberField value={element.offset} onChange={(v) => onUpdate({ ...element, offset: v })} step={1} unit="px" />
           </FieldRow>
@@ -176,6 +189,7 @@ function renderElementBody(
           </FieldRow>
         </>
       );
+    }
 
     case 'rectangle':
       return (

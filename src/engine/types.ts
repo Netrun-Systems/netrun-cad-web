@@ -14,7 +14,7 @@ export interface StrokePoint extends Point {
 
 export type AppMode = 'cad' | 'draw' | 'color' | 'text' | 'route' | 'diagram';
 
-export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move' | 'route' | 'polyline' | 'arc' | 'ellipse';
+export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move' | 'route' | 'polyline' | 'arc' | 'ellipse' | 'dim-aligned' | 'dim-angular' | 'dim-radius' | 'dim-diameter';
 
 export type DrawBrush = 'pen' | 'pencil' | 'marker';
 export type ColorBrush = 'watercolor' | 'marker' | 'fill';
@@ -146,11 +146,30 @@ export interface CADEllipse {
   metadata?: ElementMetadata;
 }
 
+/**
+ * Dimension annotation. Five styles are supported:
+ *
+ *   linear   — horizontal-or-vertical projection of |p1−p2|. Default.
+ *              p3 unused. Existing behavior; omit dimStyle for back-compat.
+ *   aligned  — measures chord length |p1−p2|, dim line drawn parallel to
+ *              the chord at perpendicular offset. p3 unused.
+ *   angular  — measures the angle between two rays.
+ *              p3 = vertex; p1 + p2 = ray endpoints.
+ *              offset = label-arc radius from vertex.
+ *   radius   — radius annotation on a circle/arc.
+ *              p1 = center, p2 = point on the curve.
+ *              radius = distance(p1, p2). Label: "R 4.5'".
+ *   diameter — diameter annotation through a circle.
+ *              p1 = center, p2 = point on the curve.
+ *              diameter = 2 × distance(p1, p2). Label: "Ø 9.0'".
+ */
 export interface CADDimension {
   type: 'dimension';
   id: string;
+  dimStyle?: 'linear' | 'aligned' | 'angular' | 'radius' | 'diameter';
   p1: Point;
   p2: Point;
+  p3?: Point;
   offset: number;
   layerId: string;
   label?: string;

@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback, useState } from 'react';
+import React, { useRef, useEffect, useCallback, useState, Suspense } from 'react';
 import getStroke from 'perfect-freehand';
 import type {
   AppMode,
@@ -557,10 +557,10 @@ export const CADCanvas: React.FC = () => {
         case 'tool:explode':
         case 'tool:align':
         case 'tool:change':
-        case 'tool:dim:aligned':
-        case 'tool:dim:angular':
-        case 'tool:dim:radius':
-        case 'tool:dim:diameter':
+        case 'tool:dim:aligned':  setMode('cad'); setCadTool('dim-aligned');  setLastDrawTool('dim-aligned');  break;
+        case 'tool:dim:angular':  setMode('cad'); setCadTool('dim-angular');  setLastDrawTool('dim-angular');  break;
+        case 'tool:dim:radius':   setMode('cad'); setCadTool('dim-radius');   setLastDrawTool('dim-radius');   break;
+        case 'tool:dim:diameter': setMode('cad'); setCadTool('dim-diameter'); setLastDrawTool('dim-diameter'); break;
         case 'tool:dim:continue':
         case 'tool:dim:baseline':
         case 'tool:dim:leader':
@@ -2186,6 +2186,42 @@ export const CADCanvas: React.FC = () => {
           projectName={projectName}
           onClose={() => setShowPlantSchedule(false)}
         />
+      )}
+
+      {/* 3D viewer overlay (Survai mode) — toggled by the `3dview` command
+          alias and the toggle3DView TopBar action. The component is React.lazy
+          so the ~1MB three.js + drei + fiber chunk only fetches when this
+          path actually renders. */}
+      {show3DView && (
+        <div className="fixed inset-0 z-40 bg-cad-bg flex flex-col">
+          <div className="flex items-center justify-between px-4 py-2 bg-cad-surface/95 border-b border-cad-accent">
+            <span className="text-cad-text text-sm font-medium">3D Viewer — Survai scan + detections</span>
+            <button
+              onClick={() => setShow3DView(false)}
+              className="text-cad-dim hover:text-cad-text text-sm transition-colors px-3 py-1 rounded hover:bg-cad-accent/30"
+              title="Close (Esc)"
+            >
+              Close ×
+            </button>
+          </div>
+          <div className="flex-1 relative">
+            <Suspense
+              fallback={
+                <div className="absolute inset-0 flex items-center justify-center text-cad-dim text-sm">
+                  Loading 3D viewer…
+                </div>
+              }
+            >
+              <ModelViewer3D
+                detections={scan3DDetections}
+                selectedDetectionId={null}
+                onDetectionSelect={() => {}}
+                pointCloudData={scanPointCloud}
+                showPointCloud={!!scanPointCloud}
+              />
+            </Suspense>
+          </div>
+        </div>
       )}
 
       {/* Property panel — single-element editor when 1 selected, group
