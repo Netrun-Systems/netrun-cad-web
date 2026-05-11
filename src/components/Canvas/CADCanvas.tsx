@@ -93,6 +93,7 @@ import { OfflineIndicator } from '../OfflineIndicator/OfflineIndicator';
 import PropertyPanel from '../PropertyPanel/PropertyPanel';
 import MultiPropertyPanel from '../PropertyPanel/MultiPropertyPanel';
 import PlantSchedulePanel from '../PlantSchedule/PlantSchedulePanel';
+import BlockLibraryPanel from '../BlockLibrary/BlockLibraryPanel';
 import { cacheProject } from '../../services/offline-storage';
 
 let plantPlaceId = 1;
@@ -167,6 +168,10 @@ export const CADCanvas: React.FC = () => {
   const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null);
   const [showPlantPanel, setShowPlantPanel] = useState(false);
   const [showPlantSchedule, setShowPlantSchedule] = useState(false);
+  const [showBlockLibrary, setShowBlockLibrary] = useState(false);
+  /** When non-null, the next click on the canvas (in select mode) drops a
+   *  block instance of this id. Cleared on placement or Esc. */
+  const [pendingBlockId, setPendingBlockId] = useState<string | null>(null);
 
   // Survai panel
   const [showSurvaiPanel, setShowSurvaiPanel] = useState(false);
@@ -684,6 +689,7 @@ export const CADCanvas: React.FC = () => {
         // Landscape
         case 'panel:plants':    setShowPlantPanel((s) => !s); break;
         case 'panel:plant-schedule': setShowPlantSchedule((s) => !s); break;
+        case 'panel:blocks':    setShowBlockLibrary((s) => !s); break;
         case 'basemap:toggle':  setBasemap((b) => ({ ...b, enabled: !b.enabled })); break;
         case 'file:scan':       /* handled by ImportExport */ break;
         case 'file:gis':        /* handled by ImportExport */ break;
@@ -881,6 +887,24 @@ export const CADCanvas: React.FC = () => {
   const onStrokeStart = useCallback(
     (point: StrokePoint) => {
       if (mode === 'cad') {
+        // Block placement: if a block is armed (from the BlockLibraryPanel),
+        // any click in CAD mode drops the instance and clears the arm.
+        // Takes priority over the active CAD tool so the user can browse
+        // the library, click a block, then click anywhere to place.
+        if (pendingBlockId) {
+          const inst: import('../../engine/types').CADBlockInstance = {
+            type: 'block',
+            id: `block-${Date.now()}`,
+            blockId: pendingBlockId,
+            position: { x: point.x, y: point.y },
+            rotation: 0,
+            scale: 1,
+            layerId: getActiveLayer(),
+          };
+          addElement(inst);
+          setPendingBlockId(null);
+          return;
+        }
         if (cadTool === 'select') {
           // 1. Resize handle hit-test takes priority over element hit-test.
           //    Without this, grabbing a corner handle would re-select the
@@ -983,7 +1007,7 @@ export const CADCanvas: React.FC = () => {
         }
       }
     },
-    [mode, cadTool, diagramTool, handleCADDown, handleDiagramDown, handleDrawStart, startPan, view, textInput, penColor, addElement, elements]
+    [mode, cadTool, diagramTool, handleCADDown, handleDiagramDown, handleDrawStart, startPan, view, textInput, penColor, addElement, elements, pendingBlockId]
   );
 
   const onStrokeMove = useCallback(
@@ -1396,6 +1420,12 @@ export const CADCanvas: React.FC = () => {
         const timeSinceLastEsc = now - lastEscRef.current;
         lastEscRef.current = now;
 
+        // Pending block placement always cancels first on Esc
+        if (pendingBlockId) {
+          setPendingBlockId(null);
+          return;
+        }
+
         if (pendingInput) {
           // First Esc: cancel current operation but keep tool
           cancelPending();
@@ -1529,7 +1559,7 @@ export const CADCanvas: React.FC = () => {
 
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool, selectedElementId, nudgeSelected, cadTool, commitPolyline]);
+  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool, selectedElementId, nudgeSelected, cadTool, commitPolyline, pendingBlockId]);
 
   // ── Compute canvas dimensions based on layout ────────────────────────────
   const sidePanelWidth = sidePanelCollapsed
@@ -2185,6 +2215,15 @@ export const CADCanvas: React.FC = () => {
           elements={elements}
           projectName={projectName}
           onClose={() => setShowPlantSchedule(false)}
+        />
+      )}
+
+      {/* Block library — slide-in panel + place-mode arm */}
+      {showBlockLibrary && (
+        <BlockLibraryPanel
+          pendingBlockId={pendingBlockId}
+          onSelectBlock={(id) => setPendingBlockId(id)}
+          onClose={() => { setShowBlockLibrary(false); setPendingBlockId(null); }}
         />
       )}
 

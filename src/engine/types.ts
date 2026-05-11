@@ -147,6 +147,27 @@ export interface CADEllipse {
 }
 
 /**
+ * Instance of a reusable block from the catalog. The instance only stores
+ * the reference (blockId) + a placement transform; the geometry lives in
+ * the BlockDefinition and is resolved at render time.
+ */
+export interface CADBlockInstance {
+  type: 'block';
+  id: string;
+  /** References a BlockDefinition.id from data/blocks.ts. */
+  blockId: string;
+  /** Insertion point on the canvas (where the block's local origin lands). */
+  position: Point;
+  /** Rotation in radians, applied around `position`. */
+  rotation: number;
+  /** Uniform scale factor. 1.0 = native size. */
+  scale: number;
+  layerId: string;
+  /** Optional override label for the schedule. */
+  label?: string;
+}
+
+/**
  * Dimension annotation. Five styles are supported:
  *
  *   linear   — horizontal-or-vertical projection of |p1−p2|. Default.
@@ -294,6 +315,7 @@ export type CADElement =
   | CADPolyline
   | CADArc
   | CADEllipse
+  | CADBlockInstance
   | CADDimension
   | FreehandStroke
   | TextElement

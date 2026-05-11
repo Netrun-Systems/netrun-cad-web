@@ -18,6 +18,7 @@ import type {
 import { distance, midpoint, angle } from './geometry';
 import { PLANT_DATABASE } from '../data/plants';
 import { INTERIOR_SYMBOLS } from '../data/interior-symbols';
+import { getBlock as getBlockDef } from '../data/blocks';
 import { iconToSvgMarkup } from './diagram-icons';
 
 interface SVGOptions {
@@ -105,6 +106,20 @@ function dimensionSVG(el: CADDimension): string {
     `<line x1="${fmt(dp1.x)}" y1="${fmt(dp1.y)}" x2="${fmt(dp2.x)}" y2="${fmt(dp2.y)}" stroke="#ff9800" stroke-width="1"/>`,
     `<text x="${fmt(mid.x)}" y="${fmt(mid.y - 4)}" fill="#ff9800" font-family="monospace" font-size="12" text-anchor="middle">${escape(label)}</text>`,
   ].join('');
+}
+
+function blockSVG(el: import('./types').CADBlockInstance, pixelsPerUnit: number): string {
+  // Resolve the block to its child elements, then render each within an
+  // SVG <g> that applies the instance transform.
+  const def = getBlockDef(el.blockId);
+  if (!def) return '';
+  const xforms = [
+    `translate(${fmt(el.position.x)} ${fmt(el.position.y)})`,
+    el.rotation ? `rotate(${((el.rotation * 180) / Math.PI).toFixed(2)})` : '',
+    el.scale !== 1 ? `scale(${el.scale.toFixed(3)})` : '',
+  ].filter(Boolean).join(' ');
+  const inner = def.elements.map((child) => elementSVG(child, pixelsPerUnit)).join('');
+  return `<g transform="${xforms}">${inner}</g>`;
 }
 
 function polylineSVG(el: import('./types').CADPolyline): string {
@@ -303,6 +318,7 @@ function elementSVG(el: CADElement, pixelsPerUnit: number): string {
     case 'arc': return arcSVG(el);
     case 'ellipse': return ellipseSVG(el);
     case 'polyline': return polylineSVG(el);
+    case 'block': return blockSVG(el, pixelsPerUnit);
     case 'dimension': return dimensionSVG(el);
     case 'freehand': return freehandSVG(el);
     case 'text': return textSVG(el);

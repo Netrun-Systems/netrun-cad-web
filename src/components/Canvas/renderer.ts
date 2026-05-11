@@ -21,6 +21,7 @@ import type {
 } from '../../engine/types';
 import { distance, formatMeasurement, midpoint, angle } from '../../engine/geometry';
 import { PLANT_DATABASE } from '../../data/plants';
+import { getBlock } from '../../data/blocks';
 import { INTERIOR_SYMBOLS } from '../../data/interior-symbols';
 import { renderInteriorSymbol } from '../../engine/interior-renderer';
 import { drawIconCanvas } from '../../engine/diagram-icons';
@@ -196,6 +197,56 @@ function renderEllipse(ctx: CanvasRenderingContext2D, el: CADEllipse) {
   ctx.strokeStyle = el.strokeColor;
   ctx.lineWidth = el.strokeWidth;
   ctx.stroke();
+}
+
+function renderBlockInstance(ctx: CanvasRenderingContext2D, el: import('../../engine/types').CADBlockInstance, grid: GridSettings) {
+  const def = getBlock(el.blockId);
+  if (!def) {
+    // Missing block ref — draw a small red X marker so the user can see
+    // and clean up stale instances.
+    ctx.save();
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(el.position.x - 8, el.position.y - 8);
+    ctx.lineTo(el.position.x + 8, el.position.y + 8);
+    ctx.moveTo(el.position.x + 8, el.position.y - 8);
+    ctx.lineTo(el.position.x - 8, el.position.y + 8);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  ctx.save();
+  ctx.translate(el.position.x, el.position.y);
+  if (el.rotation) ctx.rotate(el.rotation);
+  if (el.scale !== 1) ctx.scale(el.scale, el.scale);
+  for (const child of def.elements) {
+    switch (child.type) {
+      case 'line':       renderLine(ctx, child, grid); break;
+      case 'rectangle':  renderRectangle(ctx, child); break;
+      case 'circle':     renderCircle(ctx, child); break;
+      case 'polyline': {
+        // Inline polyline render — keeps the function private to renderer.ts
+        // for now; if a third caller appears, extract.
+        if (child.points.length < 2) break;
+        ctx.save();
+        ctx.strokeStyle = child.strokeColor;
+        ctx.lineWidth = child.strokeWidth;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(child.points[0].x, child.points[0].y);
+        for (let i = 1; i < child.points.length; i++) ctx.lineTo(child.points[i].x, child.points[i].y);
+        if (child.closed && child.points.length >= 3) ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+        break;
+      }
+      // Other element types could appear in future block definitions
+      // (text labels, fills, etc.) — add cases as needed.
+    }
+  }
+  ctx.restore();
 }
 
 function renderDimension(ctx: CanvasRenderingContext2D, el: CADDimension, grid: GridSettings) {
@@ -815,6 +866,9 @@ export function renderAll(
         break;
       case 'ellipse':
         renderEllipse(ctx, el);
+        break;
+      case 'block':
+        renderBlockInstance(ctx, el, grid);
         break;
       case 'dimension':
         renderDimension(ctx, el, grid);

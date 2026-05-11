@@ -369,6 +369,37 @@ function renderElementBody(
         </>
       );
 
+    case 'block':
+      return (
+        <>
+          <PositionReadout x={element.position.x} y={element.position.y} />
+          <SizeReadout label="Block" value={element.blockId} />
+          <FieldRow label="Rotate">
+            <NumberField
+              value={Math.round((element.rotation * 180) / Math.PI)}
+              onChange={(v) => onUpdate({ ...element, rotation: (v * Math.PI) / 180 })}
+              min={-360} max={360} unit="°"
+            />
+          </FieldRow>
+          <FieldRow label="Scale">
+            <SliderField
+              value={Math.round(element.scale * 100)}
+              onChange={(v) => onUpdate({ ...element, scale: v / 100 })}
+              min={25} max={400}
+            />
+          </FieldRow>
+          <FieldRow label="Label">
+            <input
+              type="text"
+              value={element.label ?? ''}
+              placeholder="(none)"
+              onChange={(e) => onUpdate({ ...element, label: e.target.value || undefined })}
+              className="flex-1 bg-cad-bg text-cad-text text-xs px-1.5 py-0.5 rounded border border-cad-accent/50 focus:border-cad-highlight outline-none max-w-[8rem]"
+            />
+          </FieldRow>
+        </>
+      );
+
     default:
       // flowchart-shape, container, connector — diagram-mode, no editor in v1
       return (
@@ -396,6 +427,7 @@ function elementLabel(element: CADElement): string {
     case 'text': return 'Text';
     case 'plant': return 'Plant';
     case 'interior-symbol': return 'Interior Symbol';
+    case 'block': return 'Block';
     case 'flowchart-shape': return 'Flowchart Shape';
     case 'container': return 'Container';
     case 'connector': return 'Connector';

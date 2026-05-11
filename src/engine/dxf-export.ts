@@ -4,7 +4,8 @@
  * All entities are exported to their respective layers.
  */
 
-import type { CADElement, DrawingState } from './types';
+import type { CADElement, DrawingState, Point } from './types';
+import { getBlock } from '../data/blocks';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,75 @@ function simplifyRDP(
 
 /** Default RDP tolerance for freehand strokes, in canvas pixels. */
 const FREEHAND_DXF_TOLERANCE_PX = 1.5;
+
+// ── Block instance resolution ───────────────────────────────────────────────
+//
+// DXF has BLOCK + INSERT entities for true block instancing, but they're
+// involved (a separate BLOCKS section, attribute definitions, etc.). For v1
+// we instead resolve each instance to its child elements with the instance
+// transform pre-baked into their geometry — every consumer already handles
+// the underlying primitive types, so the export is robust at the cost of
+// inlining the geometry per instance.
+
+function transformPoint(p: Point, cx: number, cy: number, cosR: number, sinR: number, scale: number, instX: number, instY: number): Point {
+  // Scale + rotate around (cx, cy), then translate to instance position.
+  const sx = (p.x - cx) * scale;
+  const sy = (p.y - cy) * scale;
+  return {
+    x: instX + sx * cosR - sy * sinR,
+    y: instY + sx * sinR + sy * cosR,
+  };
+}
+
+function resolveBlockInstance(inst: import('./types').CADBlockInstance): CADElement[] {
+  const def = getBlock(inst.blockId);
+  if (!def) return [];
+  const cosR = Math.cos(inst.rotation);
+  const sinR = Math.sin(inst.rotation);
+  const tx = (p: Point) => transformPoint(p, 0, 0, cosR, sinR, inst.scale, inst.position.x, inst.position.y);
+  const out: CADElement[] = [];
+  for (const child of def.elements) {
+    switch (child.type) {
+      case 'line':
+        out.push({ ...child, id: `${inst.id}-${child.id}`, p1: tx(child.p1), p2: tx(child.p2), layerId: inst.layerId });
+        break;
+      case 'circle': {
+        const newCenter = tx(child.center);
+        out.push({ ...child, id: `${inst.id}-${child.id}`, center: newCenter, radius: child.radius * inst.scale, layerId: inst.layerId });
+        break;
+      }
+      case 'rectangle': {
+        // Rotated rectangles can't stay axis-aligned — convert to a closed
+        // 4-vertex polyline so any rotation is preserved in DXF.
+        const c0 = tx({ x: child.origin.x, y: child.origin.y });
+        const c1 = tx({ x: child.origin.x + child.width, y: child.origin.y });
+        const c2 = tx({ x: child.origin.x + child.width, y: child.origin.y + child.height });
+        const c3 = tx({ x: child.origin.x, y: child.origin.y + child.height });
+        out.push({
+          type: 'polyline',
+          id: `${inst.id}-${child.id}`,
+          points: [c0, c1, c2, c3],
+          closed: true,
+          layerId: inst.layerId,
+          strokeColor: child.strokeColor,
+          strokeWidth: child.strokeWidth,
+        });
+        break;
+      }
+      case 'polyline':
+        out.push({
+          ...child,
+          id: `${inst.id}-${child.id}`,
+          points: child.points.map((p) => tx(p)),
+          layerId: inst.layerId,
+        });
+        break;
+      // Other element types in blocks aren't supported yet (text/plant in a
+      // block would need their own resolution); silently skip.
+    }
+  }
+  return out;
+}
 
 // In DXF, Y axis is flipped relative to canvas (canvas Y grows down, DXF Y grows up)
 function canvasYToDXF(y: number): number {
@@ -631,6 +701,14 @@ export function generateDXFString(state: DrawingState): string {
   for (const el of state.elements) {
     const layer = layerMap.get(el.layerId);
     if (!layer || !layer.visible) continue;
+    if (el.type === 'block') {
+      // Resolve the instance to its baked-transform child elements and
+      // dispatch each through the same per-element export path.
+      for (const child of resolveBlockInstance(el)) {
+        entityStrings.push(...elementToEntities(child, layer.name));
+      }
+      continue;
+    }
     const entities = elementToEntities(el, layer.name);
     entityStrings.push(...entities);
   }

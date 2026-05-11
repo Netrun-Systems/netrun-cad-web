@@ -6,6 +6,7 @@
  */
 
 import type { CADElement, Point } from './types';
+import { getBlock } from '../data/blocks';
 
 const HIT_TOLERANCE = 8; // pixels
 
@@ -141,6 +142,24 @@ export function hitTest(element: CADElement, point: Point, zoom: number): boolea
       );
     }
 
+    case 'block': {
+      // Treat the block instance as opaque — hit if the cursor is inside
+      // the rotated, scaled bbox. Cheap point-in-rotated-rect test:
+      // transform the cursor into block-local space and check the half-
+      // widths.
+      const def = getBlock(element.blockId);
+      if (!def) return false;
+      const cos = Math.cos(-element.rotation);
+      const sin = Math.sin(-element.rotation);
+      const dx = (point.x - element.position.x);
+      const dy = (point.y - element.position.y);
+      const lx = (dx * cos - dy * sin) / element.scale;
+      const ly = (dx * sin + dy * cos) / element.scale;
+      const hw = def.bbox.width / 2 + tol;
+      const hh = def.bbox.height / 2 + tol;
+      return Math.abs(lx) <= hw && Math.abs(ly) <= hh;
+    }
+
     default:
       return false;
   }
@@ -208,6 +227,8 @@ export function moveElement(element: CADElement, dx: number, dy: number): CADEle
     case 'plant':
       return { ...element, position: { x: element.position.x + dx, y: element.position.y + dy } };
     case 'interior-symbol':
+      return { ...element, position: { x: element.position.x + dx, y: element.position.y + dy } };
+    case 'block':
       return { ...element, position: { x: element.position.x + dx, y: element.position.y + dy } };
     case 'freehand':
       return { ...element, points: element.points.map(p => ({ ...p, x: p.x + dx, y: p.y + dy })) };
@@ -315,6 +336,12 @@ export function scaleElement(
         depth: Math.max(0.1, element.depth * Math.abs(sy)),
       };
     }
+    case 'block': {
+      // Blocks scale uniformly — average the magnitudes so a non-uniform
+      // drag still produces a reasonable size change.
+      const newPos = scalePoint(element.position, anchor, sx, sy);
+      return { ...element, position: newPos, scale: Math.max(0.05, element.scale * avg) };
+    }
     case 'flowchart-shape':
     case 'container': {
       const corner = { x: element.origin.x + element.width, y: element.origin.y + element.height };
@@ -415,6 +442,24 @@ export function getBoundingBox(element: CADElement): { x: number; y: number; wid
       const w = element.width * pxPerFt;
       const d = element.depth * pxPerFt;
       return { x: element.position.x - w / 2, y: element.position.y - d / 2, width: w, height: d };
+    }
+    case 'block': {
+      const def = getBlock(element.blockId);
+      if (!def) return { x: element.position.x, y: element.position.y, width: 0, height: 0 };
+      // Approximate axis-aligned bbox from the rotated/scaled block bbox:
+      // take the absolute-cosine + absolute-sine projection.
+      const w = def.bbox.width * element.scale;
+      const h = def.bbox.height * element.scale;
+      const cos = Math.abs(Math.cos(element.rotation));
+      const sin = Math.abs(Math.sin(element.rotation));
+      const aw = w * cos + h * sin;
+      const ah = w * sin + h * cos;
+      return {
+        x: element.position.x - aw / 2,
+        y: element.position.y - ah / 2,
+        width: aw,
+        height: ah,
+      };
     }
     case 'freehand': {
       const xs = element.points.map(p => p.x);
