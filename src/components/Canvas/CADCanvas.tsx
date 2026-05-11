@@ -90,6 +90,7 @@ import type { DemoProject } from '../../data/demo-project';
 import { linkAnnotationToDeviation, type LinkedAnnotation } from '../../engine/annotation-linker';
 import { RouteTutorialOverlay } from '../RouteEditor/RouteTutorialOverlay';
 import { OfflineIndicator } from '../OfflineIndicator/OfflineIndicator';
+import PropertyPanel from '../PropertyPanel/PropertyPanel';
 import { cacheProject } from '../../services/offline-storage';
 
 let plantPlaceId = 1;
@@ -410,6 +411,50 @@ export const CADCanvas: React.FC = () => {
         // No selection — delete the last element (legacy behavior)
         next = prev.slice(0, -1);
       }
+      setHistoryState((h) => pushState(h, next));
+      return next;
+    });
+  }, [selectedElementId]);
+
+  // Replace the selected element with an updated version (color, width, layer, etc.)
+  const handleUpdateSelected = useCallback((next: import('../../engine/types').CADElement) => {
+    setElements((prev) => {
+      const updated = prev.map((el) => (el.id === next.id ? next : el));
+      setHistoryState((h) => pushState(h, updated));
+      return updated;
+    });
+  }, []);
+
+  // Reorder the selected element relative to the rest. Array order is z-order:
+  // index 0 is drawn first (back), the last index is drawn on top (front).
+  const handleReorderSelected = useCallback(
+    (direction: 'front' | 'back' | 'forward' | 'backward') => {
+      if (!selectedElementId) return;
+      setElements((prev) => {
+        const idx = prev.findIndex((el) => el.id === selectedElementId);
+        if (idx === -1) return prev;
+        const next = prev.slice();
+        const [el] = next.splice(idx, 1);
+        let newIdx: number;
+        switch (direction) {
+          case 'front':    newIdx = next.length; break;
+          case 'back':     newIdx = 0;           break;
+          case 'forward':  newIdx = Math.min(next.length, idx + 1); break;
+          case 'backward': newIdx = Math.max(0, idx - 1); break;
+        }
+        next.splice(newIdx, 0, el);
+        setHistoryState((h) => pushState(h, next));
+        return next;
+      });
+    },
+    [selectedElementId],
+  );
+
+  // Nudge selected element by N pixels in canvas space.
+  const nudgeSelected = useCallback((dx: number, dy: number) => {
+    if (!selectedElementId) return;
+    setElements((prev) => {
+      const next = prev.map((el) => (el.id === selectedElementId ? moveElement(el, dx, dy) : el));
       setHistoryState((h) => pushState(h, next));
       return next;
     });
@@ -1266,6 +1311,16 @@ export const CADCanvas: React.FC = () => {
         return;
       }
 
+      // ── Arrow-key nudge for selected element (1px / 10px with shift) ──────
+      if (selectedElementId && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp'   ? -step : e.key === 'ArrowDown'  ? step : 0;
+        nudgeSelected(dx, dy);
+        return;
+      }
+
       // ── Delete last element ────────────────────────────────────────────────
       if (e.key === 'Backspace' || e.key === 'Delete') {
         doDelete();
@@ -1314,7 +1369,7 @@ export const CADCanvas: React.FC = () => {
 
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool]);
+  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool, selectedElementId, nudgeSelected]);
 
   // ── Compute canvas dimensions based on layout ────────────────────────────
   const sidePanelWidth = sidePanelCollapsed
@@ -1935,6 +1990,22 @@ export const CADCanvas: React.FC = () => {
           onClose={() => setShowSurvaiPanel(false)}
         />
       )}
+
+      {/* Property panel for the selected element */}
+      {selectedElementId && (() => {
+        const el = elements.find((e) => e.id === selectedElementId);
+        if (!el) return null;
+        return (
+          <PropertyPanel
+            element={el}
+            layers={layers}
+            onUpdate={handleUpdateSelected}
+            onDelete={doDelete}
+            onReorder={handleReorderSelected}
+            onClose={() => setSelectedElementId(null)}
+          />
+        );
+      })()}
 
       {/* Project Dashboard */}
       <ProjectDashboard
