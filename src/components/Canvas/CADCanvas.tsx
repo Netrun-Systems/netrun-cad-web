@@ -91,6 +91,7 @@ import { linkAnnotationToDeviation, type LinkedAnnotation } from '../../engine/a
 import { RouteTutorialOverlay } from '../RouteEditor/RouteTutorialOverlay';
 import { OfflineIndicator } from '../OfflineIndicator/OfflineIndicator';
 import PropertyPanel from '../PropertyPanel/PropertyPanel';
+import PlantSchedulePanel from '../PlantSchedule/PlantSchedulePanel';
 import { cacheProject } from '../../services/offline-storage';
 
 let plantPlaceId = 1;
@@ -164,6 +165,7 @@ export const CADCanvas: React.FC = () => {
   // Plant placement
   const [selectedPlantId, setSelectedPlantId] = useState<string | null>(null);
   const [showPlantPanel, setShowPlantPanel] = useState(false);
+  const [showPlantSchedule, setShowPlantSchedule] = useState(false);
 
   // Survai panel
   const [showSurvaiPanel, setShowSurvaiPanel] = useState(false);
@@ -634,6 +636,7 @@ export const CADCanvas: React.FC = () => {
 
         // Landscape
         case 'panel:plants':    setShowPlantPanel((s) => !s); break;
+        case 'panel:plant-schedule': setShowPlantSchedule((s) => !s); break;
         case 'basemap:toggle':  setBasemap((b) => ({ ...b, enabled: !b.enabled })); break;
         case 'file:scan':       /* handled by ImportExport */ break;
         case 'file:gis':        /* handled by ImportExport */ break;
@@ -1988,6 +1991,15 @@ export const CADCanvas: React.FC = () => {
         <SurvaiPanel
           onImport={handleImport}
           onClose={() => setShowSurvaiPanel(false)}
+        />
+      )}
+
+      {/* Plant Schedule modal */}
+      {showPlantSchedule && (
+        <PlantSchedulePanel
+          elements={elements}
+          projectName={projectName}
+          onClose={() => setShowPlantSchedule(false)}
         />
       )}
 

@@ -132,6 +132,7 @@ export const COMMANDS: Command[] = [
 
   // ── LANDSCAPE (Netrun additions) ──────────────────────────────────────────
   { aliases: ['plant', 'plantdb'],      action: 'panel:plants',         description: 'Open plant database browser', requiresPoints: 0, category: 'landscape' },
+  { aliases: ['sched', 'schedule', 'plantlist'], action: 'panel:plant-schedule', description: 'Open plant schedule (qty, water use, export)', requiresPoints: 0, category: 'landscape' },
   { aliases: ['basemap', 'sat'],        action: 'basemap:toggle',       description: 'Toggle satellite basemap',    requiresPoints: 0, category: 'landscape' },
   { aliases: ['scan'],                  action: 'file:scan',            description: 'Import 3D scan (local file)', requiresPoints: 0, category: 'landscape' },
   { aliases: ['survai', 'cloud'],       action: 'panel:survai',         description: 'Open Survai cloud scans',     requiresPoints: 0, category: 'landscape' },

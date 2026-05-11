@@ -14,6 +14,71 @@ function pxToFt(px: number): number {
   return px / PIXELS_PER_FOOT;
 }
 
+// ── Ramer-Douglas-Peucker stroke simplification ─────────────────────────────
+//
+// Apple Pencil at 240 Hz writes ~480 points per 2-second stroke. Exporting
+// each point as a LWPOLYLINE vertex inflates DXF size 10x+ without any
+// visible quality gain. RDP with a small tolerance (~1.5 canvas px ≈ 0.4 in
+// at the default scale, well below pen thickness) preserves the stroke shape
+// while cutting vertex count by an order of magnitude.
+
+/** Perpendicular distance from point p to the line through a-b. */
+function perpDistance(p: [number, number], a: [number, number], b: [number, number]): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+  // Cross-product magnitude / segment length
+  return Math.abs(dy * p[0] - dx * p[1] + b[0] * a[1] - b[1] * a[0]) / Math.sqrt(lenSq);
+}
+
+/**
+ * Iterative Ramer-Douglas-Peucker. Returns the simplified point list
+ * preserving start + end and any point whose perpendicular distance from
+ * the running approximation exceeds `tolerance`.
+ */
+function simplifyRDP(
+  points: Array<[number, number]>,
+  tolerance: number,
+): Array<[number, number]> {
+  if (points.length < 3) return points.slice();
+
+  // Iterative implementation to avoid blowing the stack on long strokes.
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+
+  const stack: Array<[number, number]> = [[0, points.length - 1]];
+  while (stack.length > 0) {
+    const [start, end] = stack.pop()!;
+    let maxDist = 0;
+    let maxIdx = -1;
+    const a = points[start];
+    const b = points[end];
+    for (let i = start + 1; i < end; i++) {
+      const d = perpDistance(points[i], a, b);
+      if (d > maxDist) {
+        maxDist = d;
+        maxIdx = i;
+      }
+    }
+    if (maxIdx !== -1 && maxDist > tolerance) {
+      keep[maxIdx] = 1;
+      stack.push([start, maxIdx]);
+      stack.push([maxIdx, end]);
+    }
+  }
+
+  const out: Array<[number, number]> = [];
+  for (let i = 0; i < points.length; i++) {
+    if (keep[i]) out.push(points[i]);
+  }
+  return out;
+}
+
+/** Default RDP tolerance for freehand strokes, in canvas pixels. */
+const FREEHAND_DXF_TOLERANCE_PX = 1.5;
+
 // In DXF, Y axis is flipped relative to canvas (canvas Y grows down, DXF Y grows up)
 function canvasYToDXF(y: number): number {
   return -pxToFt(y);
@@ -400,10 +465,15 @@ function elementToEntities(el: CADElement, layerName: string): string[] {
 
     case 'freehand': {
       if (el.points.length < 2) break;
-      // Export freehand as LWPOLYLINE (centreline approximation)
-      const pts: Array<[number, number]> = el.points.map((p) => [
-        canvasXToDXF(p.x),
-        canvasYToDXF(p.y),
+      // Simplify the stroke before LWPOLYLINE conversion. Apple Pencil at
+      // 240 Hz produces dense point streams; RDP cuts vertex count 10x+
+      // without visible quality loss because the tolerance (1.5 canvas px)
+      // is well below stroke thickness.
+      const canvasPts: Array<[number, number]> = el.points.map((p) => [p.x, p.y]);
+      const simplified = simplifyRDP(canvasPts, FREEHAND_DXF_TOLERANCE_PX);
+      const pts: Array<[number, number]> = simplified.map(([x, y]) => [
+        canvasXToDXF(x),
+        canvasYToDXF(y),
       ]);
       entities.push(entityLWPolyline(pts, false, layerName));
       break;
