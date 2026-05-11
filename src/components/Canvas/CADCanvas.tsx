@@ -522,10 +522,10 @@ export const CADCanvas: React.FC = () => {
         case 'tool:select':      setMode('cad'); setCadTool('select');      break;
         case 'tool:move':        setMode('cad'); setCadTool('move');        break;
         case 'tool:polyline':    setMode('cad'); setCadTool('polyline'); setLastDrawTool('polyline'); break;
+        case 'tool:arc':         setMode('cad'); setCadTool('arc');      setLastDrawTool('arc');      break;
+        case 'tool:ellipse':     setMode('cad'); setCadTool('ellipse');  setLastDrawTool('ellipse');  break;
 
         // Unimplemented CAD tools — acknowledge but no-op until implemented
-        case 'tool:arc':
-        case 'tool:ellipse':
         case 'tool:spline':
         case 'tool:xline':
         case 'tool:ray':

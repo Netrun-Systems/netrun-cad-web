@@ -215,6 +215,54 @@ function renderElementBody(
         </>
       );
 
+    case 'arc': {
+      const startDeg = ((element.startAngle * 180) / Math.PI).toFixed(1);
+      const endDeg = ((element.endAngle * 180) / Math.PI).toFixed(1);
+      const sweep = (((element.endAngle - element.startAngle) * 180) / Math.PI).toFixed(1);
+      return (
+        <>
+          <PositionReadout x={element.center.x} y={element.center.y} />
+          <SizeReadout label="R" value={`${toFt(element.radius)} FT`} />
+          <SizeReadout label="Sweep" value={`${sweep}°  (${startDeg}° → ${endDeg}°)`} />
+          <FieldRow label="Color">
+            <ColorField value={element.strokeColor} onChange={(v) => onUpdate({ ...element, strokeColor: v ?? '#ffffff' })} />
+          </FieldRow>
+          <FieldRow label="Width">
+            <SliderField value={element.strokeWidth} onChange={(v) => onUpdate({ ...element, strokeWidth: v })} min={1} max={8} />
+          </FieldRow>
+          <FieldRow label="Radius">
+            <NumberField value={Number(toFt(element.radius))} onChange={(v) => onUpdate({ ...element, radius: v * PIXELS_PER_FOOT })} min={0.1} step={0.1} unit="FT" />
+          </FieldRow>
+        </>
+      );
+    }
+
+    case 'ellipse':
+      return (
+        <>
+          <PositionReadout x={element.center.x} y={element.center.y} />
+          <SizeReadout label="W × H" value={`${(toFt(element.rx * 2))} × ${(toFt(element.ry * 2))} FT`} />
+          <FieldRow label="Stroke">
+            <ColorField value={element.strokeColor} onChange={(v) => onUpdate({ ...element, strokeColor: v ?? '#ffffff' })} />
+          </FieldRow>
+          <FieldRow label="Fill">
+            <ColorField value={element.fillColor ?? ''} allowClear onChange={(v) => onUpdate({ ...element, fillColor: v })} />
+          </FieldRow>
+          <FieldRow label="Width">
+            <SliderField value={element.strokeWidth} onChange={(v) => onUpdate({ ...element, strokeWidth: v })} min={1} max={8} />
+          </FieldRow>
+          <FieldRow label="Rx">
+            <NumberField value={Number(toFt(element.rx))} onChange={(v) => onUpdate({ ...element, rx: v * PIXELS_PER_FOOT })} min={0.1} step={0.1} unit="FT" />
+          </FieldRow>
+          <FieldRow label="Ry">
+            <NumberField value={Number(toFt(element.ry))} onChange={(v) => onUpdate({ ...element, ry: v * PIXELS_PER_FOOT })} min={0.1} step={0.1} unit="FT" />
+          </FieldRow>
+          <FieldRow label="Rotate">
+            <NumberField value={Math.round(((element.rotation ?? 0) * 180) / Math.PI)} onChange={(v) => onUpdate({ ...element, rotation: (v * Math.PI) / 180 })} min={-360} max={360} unit="°" />
+          </FieldRow>
+        </>
+      );
+
     case 'freehand':
       return (
         <>
@@ -326,6 +374,8 @@ function elementLabel(element: CADElement): string {
     case 'line': return 'Line';
     case 'rectangle': return 'Rectangle';
     case 'circle': return 'Circle';
+    case 'arc': return 'Arc';
+    case 'ellipse': return 'Ellipse';
     case 'polyline': return 'Polyline';
     case 'dimension': return 'Dimension';
     case 'freehand': return 'Freehand Stroke';

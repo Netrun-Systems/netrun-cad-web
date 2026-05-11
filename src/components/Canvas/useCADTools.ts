@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import type { CADTool, CADElement, CADLine, CADRectangle, CADCircle, CADDimension, CADPolyline, Point, GridSettings } from '../../engine/types';
+import type { CADTool, CADElement, CADLine, CADRectangle, CADCircle, CADDimension, CADPolyline, CADArc, CADEllipse, Point, GridSettings } from '../../engine/types';
 import { snapToGrid, distance, angle } from '../../engine/geometry';
 
 let nextId = 1;
@@ -104,6 +104,40 @@ export function useCADTools({
   // the user presses Enter/Esc. Lives in a ref so that mid-stream clicks
   // append without React state thrashing.
   const polylinePointsRef = useRef<Point[]>([]);
+
+  // Arc tool — 3-click flow: start, end, hint-point-on-arc.
+  const arcPhaseRef = useRef(0);
+  const arcStartRef = useRef<Point | null>(null);
+  const arcEndRef = useRef<Point | null>(null);
+
+  /**
+   * Build an arc from three points: start, end, and a hint point that
+   * lies on the desired arc (determines the sweep direction). Returns
+   * null when the points are collinear (no unique circle).
+   */
+  function arcFromThreePoints(p1: Point, p2: Point, p3: Point) {
+    const m1 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+    const m2 = { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 };
+    const d1 = { x: p2.x - p1.x, y: p2.y - p1.y };
+    const d2 = { x: p3.x - p2.x, y: p3.y - p2.y };
+    const pd1 = { x: -d1.y, y: d1.x }; // perpendicular bisector direction
+    const pd2 = { x: -d2.y, y: d2.x };
+    const denom = pd1.x * pd2.y - pd1.y * pd2.x;
+    if (Math.abs(denom) < 1e-9) return null;
+    const t = ((m2.x - m1.x) * pd2.y - (m2.y - m1.y) * pd2.x) / denom;
+    const center = { x: m1.x + t * pd1.x, y: m1.y + t * pd1.y };
+    const radius = Math.hypot(p1.x - center.x, p1.y - center.y);
+    if (!isFinite(radius) || radius < 1) return null;
+    const startAngle = Math.atan2(p1.y - center.y, p1.x - center.x);
+    const endAngle = Math.atan2(p2.y - center.y, p2.x - center.x);
+    // Cross product of (p2-p1) × (p3-p1) tells us which side of the chord
+    // the hint point sits on. Negative cross (canvas-Y-down) → hint is
+    // visually above the chord → sweep CCW. Positive → CW. (Verified by
+    // hand against several point configurations.)
+    const cross = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+    const counterclockwise = cross < 0;
+    return { center, radius, startAngle, endAngle, counterclockwise };
+  }
 
   /** Apply ortho constraint: snap angle to nearest 90 degrees */
   const applyOrtho = useCallback((start: Point, end: Point): Point => {
@@ -210,6 +244,48 @@ export function useCADTools({
         return;
       }
 
+      // ─── Arc: 3-click flow (start, end, hint point on arc) ────
+      if (activeTool === 'arc') {
+        const phase = arcPhaseRef.current;
+        if (phase === 0) {
+          arcStartRef.current = point;
+          arcPhaseRef.current = 1;
+          setPendingInput({ tool: 'arc', startPoint: point, phase: 1, prompt: 'Specify arc end point:' });
+          return;
+        }
+        if (phase === 1) {
+          arcEndRef.current = point;
+          arcPhaseRef.current = 2;
+          setPendingInput({ tool: 'arc', startPoint: arcStartRef.current!, secondPoint: point, phase: 2, prompt: 'Specify a point on the arc (sets bulge direction):' });
+          return;
+        }
+        if (phase === 2) {
+          const built = arcFromThreePoints(arcStartRef.current!, arcEndRef.current!, point);
+          if (built) {
+            const el: CADArc = {
+              type: 'arc',
+              id: genId('arc'),
+              center: built.center,
+              radius: built.radius,
+              startAngle: built.startAngle,
+              endAngle: built.endAngle,
+              counterclockwise: built.counterclockwise,
+              layerId: activeLayerId,
+              strokeColor,
+              strokeWidth,
+            };
+            onElementCreated(el);
+          }
+          arcPhaseRef.current = 0;
+          arcStartRef.current = null;
+          arcEndRef.current = null;
+          setPendingInput(null);
+          onPreviewChange(null);
+          return;
+        }
+        return;
+      }
+
       // ─── Polyline: multi-click accumulation, finalized on Enter/Esc ────
       if (activeTool === 'polyline') {
         polylinePointsRef.current.push(point);
@@ -227,8 +303,8 @@ export function useCADTools({
         return;
       }
 
-      // ─── Standard tools (line, rectangle, circle): click-based flow ────
-      if (activeTool === 'line' || activeTool === 'rectangle' || activeTool === 'circle') {
+      // ─── Standard tools (line, rectangle, circle, ellipse): click-based flow ────
+      if (activeTool === 'line' || activeTool === 'rectangle' || activeTool === 'circle' || activeTool === 'ellipse') {
         if (!startPointRef.current) {
           // First click: set start point, enter awaiting mode
           startPointRef.current = point;
@@ -237,6 +313,7 @@ export function useCADTools({
             line: 'Specify next point or type length:',
             rectangle: 'Specify opposite corner or type WxH:',
             circle: 'Specify radius point or type radius:',
+            ellipse: 'Specify corner of ellipse bounding box:',
           };
 
           setPendingInput({
@@ -292,6 +369,25 @@ export function useCADTools({
             origin: { x: w < 0 ? end.x : start.x, y: h < 0 ? end.y : start.y },
             width: Math.abs(w),
             height: Math.abs(h),
+            layerId: activeLayerId,
+            strokeColor,
+            strokeWidth,
+          };
+          onElementCreated(el);
+          break;
+        }
+        case 'ellipse': {
+          // Center+corner model — start is the center, end defines a
+          // corner of the bounding rectangle, so rx = |dx|, ry = |dy|.
+          const rx = Math.abs(dx);
+          const ry = Math.abs(dy);
+          if (rx < 1 || ry < 1) break;
+          const el: CADEllipse = {
+            type: 'ellipse',
+            id: genId('ellipse'),
+            center: start,
+            rx,
+            ry,
             layerId: activeLayerId,
             strokeColor,
             strokeWidth,
@@ -365,6 +461,44 @@ export function useCADTools({
         return;
       }
 
+      // ─── Arc preview ──
+      if (activeTool === 'arc') {
+        const phase = arcPhaseRef.current;
+        if (phase === 1 && arcStartRef.current) {
+          // Phase 1: rubber-band line from start to cursor (chord preview)
+          const preview: CADLine = {
+            type: 'line',
+            id: '__preview__',
+            p1: arcStartRef.current,
+            p2: point,
+            layerId: activeLayerId,
+            strokeColor: '#ff9800',
+            strokeWidth: 1,
+          };
+          onPreviewChange(preview);
+        }
+        if (phase === 2 && arcStartRef.current && arcEndRef.current) {
+          // Phase 2: full arc preview through start, end, and cursor
+          const built = arcFromThreePoints(arcStartRef.current, arcEndRef.current, point);
+          if (built) {
+            const preview: CADArc = {
+              type: 'arc',
+              id: '__preview__',
+              center: built.center,
+              radius: built.radius,
+              startAngle: built.startAngle,
+              endAngle: built.endAngle,
+              counterclockwise: built.counterclockwise,
+              layerId: activeLayerId,
+              strokeColor,
+              strokeWidth,
+            };
+            onPreviewChange(preview);
+          }
+        }
+        return;
+      }
+
       // ─── Polyline preview: existing segments + live segment to cursor ──
       if (activeTool === 'polyline' && polylinePointsRef.current.length > 0) {
         const livePoints = [...polylinePointsRef.current, point];
@@ -393,6 +527,23 @@ export function useCADTools({
       );
 
       switch (activeTool) {
+        case 'ellipse': {
+          const rx = Math.abs(point.x - start.x);
+          const ry = Math.abs(point.y - start.y);
+          if (rx < 1 || ry < 1) break;
+          const preview: CADEllipse = {
+            type: 'ellipse',
+            id: '__preview__',
+            center: start,
+            rx,
+            ry,
+            layerId: activeLayerId,
+            strokeColor,
+            strokeWidth,
+          };
+          onPreviewChange(preview);
+          break;
+        }
         case 'line': {
           const preview: CADLine = {
             type: 'line',
@@ -574,6 +725,9 @@ export function useCADTools({
     dimP1Ref.current = null;
     dimP2Ref.current = null;
     polylinePointsRef.current = [];
+    arcPhaseRef.current = 0;
+    arcStartRef.current = null;
+    arcEndRef.current = null;
     setPendingInput(null);
     onPreviewChange(null);
   }, [onPreviewChange]);

@@ -14,7 +14,7 @@ export interface StrokePoint extends Point {
 
 export type AppMode = 'cad' | 'draw' | 'color' | 'text' | 'route' | 'diagram';
 
-export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move' | 'route' | 'polyline';
+export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move' | 'route' | 'polyline' | 'arc' | 'ellipse';
 
 export type DrawBrush = 'pen' | 'pencil' | 'marker';
 export type ColorBrush = 'watercolor' | 'marker' | 'fill';
@@ -109,6 +109,40 @@ export interface CADPolyline {
   layerId: string;
   strokeColor: string;
   strokeWidth: number;
+  metadata?: ElementMetadata;
+}
+
+export interface CADArc {
+  type: 'arc';
+  id: string;
+  center: Point;
+  radius: number;
+  /** Start angle in radians, measured CCW from +X axis. */
+  startAngle: number;
+  /** End angle in radians, measured CCW from +X axis. */
+  endAngle: number;
+  /** Sweep direction. Default false = counter-clockwise (math convention). */
+  counterclockwise?: boolean;
+  layerId: string;
+  strokeColor: string;
+  strokeWidth: number;
+  metadata?: ElementMetadata;
+}
+
+export interface CADEllipse {
+  type: 'ellipse';
+  id: string;
+  center: Point;
+  /** Semi-axis along the canvas X axis. */
+  rx: number;
+  /** Semi-axis along the canvas Y axis. */
+  ry: number;
+  /** Rotation of the major axis in radians. Default 0 = axis-aligned. */
+  rotation?: number;
+  layerId: string;
+  strokeColor: string;
+  strokeWidth: number;
+  fillColor?: string;
   metadata?: ElementMetadata;
 }
 
@@ -239,6 +273,8 @@ export type CADElement =
   | CADRectangle
   | CADCircle
   | CADPolyline
+  | CADArc
+  | CADEllipse
   | CADDimension
   | FreehandStroke
   | TextElement

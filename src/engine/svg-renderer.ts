@@ -66,6 +66,29 @@ function circleSVG(el: CADCircle): string {
   return `<circle cx="${fmt(el.center.x)}" cy="${fmt(el.center.y)}" r="${fmt(el.radius)}" stroke="${el.strokeColor}" stroke-width="${el.strokeWidth}"${fill}/>`;
 }
 
+function arcSVG(el: import('./types').CADArc): string {
+  // SVG arc via path A command. Compute start/end points from center + angles.
+  const sx = el.center.x + el.radius * Math.cos(el.startAngle);
+  const sy = el.center.y + el.radius * Math.sin(el.startAngle);
+  const ex = el.center.x + el.radius * Math.cos(el.endAngle);
+  const ey = el.center.y + el.radius * Math.sin(el.endAngle);
+  // Sweep span (always positive)
+  let span = el.endAngle - el.startAngle;
+  if (el.counterclockwise) span = -span;
+  while (span < 0) span += Math.PI * 2;
+  const largeArc = span > Math.PI ? 1 : 0;
+  const sweepFlag = el.counterclockwise ? 0 : 1;
+  return `<path d="M ${fmt(sx)} ${fmt(sy)} A ${fmt(el.radius)} ${fmt(el.radius)} 0 ${largeArc} ${sweepFlag} ${fmt(ex)} ${fmt(ey)}" fill="none" stroke="${el.strokeColor}" stroke-width="${el.strokeWidth}" stroke-linecap="round"/>`;
+}
+
+function ellipseSVG(el: import('./types').CADEllipse): string {
+  const fill = el.fillColor ? ` fill="${el.fillColor}"` : ' fill="none"';
+  const xform = el.rotation
+    ? ` transform="rotate(${(el.rotation * 180 / Math.PI).toFixed(2)} ${fmt(el.center.x)} ${fmt(el.center.y)})"`
+    : '';
+  return `<ellipse cx="${fmt(el.center.x)}" cy="${fmt(el.center.y)}" rx="${fmt(el.rx)}" ry="${fmt(el.ry)}" stroke="${el.strokeColor}" stroke-width="${el.strokeWidth}"${fill}${xform}/>`;
+}
+
 function dimensionSVG(el: CADDimension): string {
   const dist = distance(el.p1, el.p2);
   const ang = angle(el.p1, el.p2);
@@ -277,6 +300,8 @@ function elementSVG(el: CADElement, pixelsPerUnit: number): string {
     case 'line': return lineSVG(el);
     case 'rectangle': return rectSVG(el);
     case 'circle': return circleSVG(el);
+    case 'arc': return arcSVG(el);
+    case 'ellipse': return ellipseSVG(el);
     case 'polyline': return polylineSVG(el);
     case 'dimension': return dimensionSVG(el);
     case 'freehand': return freehandSVG(el);

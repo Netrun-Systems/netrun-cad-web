@@ -4,6 +4,8 @@ import type {
   CADLine,
   CADRectangle,
   CADCircle,
+  CADArc,
+  CADEllipse,
   CADPolyline,
   CADDimension,
   FreehandStroke,
@@ -166,6 +168,27 @@ function renderRectangle(ctx: CanvasRenderingContext2D, el: CADRectangle) {
 function renderCircle(ctx: CanvasRenderingContext2D, el: CADCircle) {
   ctx.beginPath();
   ctx.arc(el.center.x, el.center.y, el.radius, 0, Math.PI * 2);
+  if (el.fillColor) {
+    ctx.fillStyle = el.fillColor;
+    ctx.fill();
+  }
+  ctx.strokeStyle = el.strokeColor;
+  ctx.lineWidth = el.strokeWidth;
+  ctx.stroke();
+}
+
+function renderArc(ctx: CanvasRenderingContext2D, el: CADArc) {
+  ctx.beginPath();
+  ctx.arc(el.center.x, el.center.y, el.radius, el.startAngle, el.endAngle, !!el.counterclockwise);
+  ctx.strokeStyle = el.strokeColor;
+  ctx.lineWidth = el.strokeWidth;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+}
+
+function renderEllipse(ctx: CanvasRenderingContext2D, el: CADEllipse) {
+  ctx.beginPath();
+  ctx.ellipse(el.center.x, el.center.y, el.rx, el.ry, el.rotation ?? 0, 0, Math.PI * 2);
   if (el.fillColor) {
     ctx.fillStyle = el.fillColor;
     ctx.fill();
@@ -686,6 +709,12 @@ export function renderAll(
         break;
       case 'circle':
         renderCircle(ctx, el);
+        break;
+      case 'arc':
+        renderArc(ctx, el);
+        break;
+      case 'ellipse':
+        renderEllipse(ctx, el);
         break;
       case 'dimension':
         renderDimension(ctx, el, grid);

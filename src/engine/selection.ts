@@ -53,6 +53,39 @@ export function hitTest(element: CADElement, point: Point, zoom: number): boolea
       return Math.abs(dist - element.radius) < tol || dist < element.radius;
     }
 
+    case 'arc': {
+      const dx = point.x - element.center.x;
+      const dy = point.y - element.center.y;
+      const dist = Math.hypot(dx, dy);
+      if (Math.abs(dist - element.radius) >= tol) return false;
+      // Check the angle is within the sweep range
+      const ang = Math.atan2(dy, dx);
+      const norm = (a: number) => {
+        const t = a % (Math.PI * 2);
+        return t < 0 ? t + Math.PI * 2 : t;
+      };
+      const start = norm(element.startAngle);
+      const end = norm(element.endAngle);
+      const a = norm(ang);
+      // Sweep from start to end going counter-clockwise (canvas Y is down,
+      // so default sweep matches the renderer's anticlockwise=false branch).
+      if (start <= end) return a >= start && a <= end;
+      return a >= start || a <= end;
+    }
+
+    case 'ellipse': {
+      const dx = point.x - element.center.x;
+      const dy = point.y - element.center.y;
+      // Outline test in scaled space: a point is on the perimeter when
+      // (dx/rx)^2 + (dy/ry)^2 ≈ 1. Tolerance scaled to roughly canvas pixels.
+      const nx = dx / element.rx;
+      const ny = dy / element.ry;
+      const r2 = nx * nx + ny * ny;
+      const t = tol / Math.min(element.rx, element.ry);
+      // Hit if on the perimeter OR inside the ellipse
+      return Math.abs(Math.sqrt(r2) - 1) < t || r2 < 1;
+    }
+
     case 'freehand': {
       // Check proximity to any segment in the stroke
       const pts = element.points;
@@ -166,6 +199,10 @@ export function moveElement(element: CADElement, dx: number, dy: number): CADEle
       return { ...element, origin: { x: element.origin.x + dx, y: element.origin.y + dy } };
     case 'circle':
       return { ...element, center: { x: element.center.x + dx, y: element.center.y + dy } };
+    case 'arc':
+      return { ...element, center: { x: element.center.x + dx, y: element.center.y + dy } };
+    case 'ellipse':
+      return { ...element, center: { x: element.center.x + dx, y: element.center.y + dy } };
     case 'text':
       return { ...element, position: { x: element.position.x + dx, y: element.position.y + dy } };
     case 'plant':
@@ -241,6 +278,20 @@ export function scaleElement(
       const newCenter = scalePoint(element.center, anchor, sx, sy);
       const newRadius = Math.max(MIN_SIZE / 2, element.radius * Math.max(Math.abs(sx), Math.abs(sy)));
       return { ...element, center: newCenter, radius: newRadius };
+    }
+    case 'arc': {
+      const newCenter = scalePoint(element.center, anchor, sx, sy);
+      const newRadius = Math.max(MIN_SIZE / 2, element.radius * Math.max(Math.abs(sx), Math.abs(sy)));
+      return { ...element, center: newCenter, radius: newRadius };
+    }
+    case 'ellipse': {
+      const newCenter = scalePoint(element.center, anchor, sx, sy);
+      return {
+        ...element,
+        center: newCenter,
+        rx: Math.max(MIN_SIZE / 2, element.rx * Math.abs(sx)),
+        ry: Math.max(MIN_SIZE / 2, element.ry * Math.abs(sy)),
+      };
     }
     case 'freehand':
       return { ...element, points: element.points.map((p) => ({ ...p, ...scalePoint(p, anchor, sx, sy) })) };
@@ -343,6 +394,13 @@ export function getBoundingBox(element: CADElement): { x: number; y: number; wid
       return { x: element.origin.x, y: element.origin.y, width: element.width, height: element.height };
     case 'circle':
       return { x: element.center.x - element.radius, y: element.center.y - element.radius, width: element.radius * 2, height: element.radius * 2 };
+    case 'arc':
+      // Use the full circle bbox — tight arc bbox needs per-quadrant analysis,
+      // not worth the complexity for a selection-highlight rectangle that's
+      // only a touch larger than the arc itself.
+      return { x: element.center.x - element.radius, y: element.center.y - element.radius, width: element.radius * 2, height: element.radius * 2 };
+    case 'ellipse':
+      return { x: element.center.x - element.rx, y: element.center.y - element.ry, width: element.rx * 2, height: element.ry * 2 };
     case 'text': {
       const w = element.content.length * element.fontSize * 0.6;
       const h = element.fontSize * 1.2;

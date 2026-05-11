@@ -338,6 +338,37 @@ ${cy.toFixed(4)}
 ${r.toFixed(4)}`;
 }
 
+function entityArc(
+  cx: number, cy: number, r: number,
+  startAngleDeg: number, endAngleDeg: number,
+  layer: string,
+): string {
+  return `  0
+ARC
+  5
+${nextHandle()}
+100
+AcDbEntity
+  8
+${layer}
+100
+AcDbCircle
+ 10
+${cx.toFixed(4)}
+ 20
+${cy.toFixed(4)}
+ 30
+0.0
+ 40
+${r.toFixed(4)}
+100
+AcDbArc
+ 50
+${startAngleDeg.toFixed(4)}
+ 51
+${endAngleDeg.toFixed(4)}`;
+}
+
 function entityLWPolyline(
   points: Array<[number, number]>,
   closed: boolean,
@@ -486,6 +517,52 @@ function elementToEntities(el: CADElement, layerName: string): string[] {
         canvasYToDXF(p.y),
       ]);
       entities.push(entityLWPolyline(pts, !!el.closed, layerName));
+      break;
+    }
+
+    case 'arc': {
+      // DXF angles are degrees CCW from +X. Canvas Y points down, but the
+      // DXF Y axis points up — canvasYToDXF flips Y, which also reflects
+      // angles across the X axis. To preserve the visual orientation,
+      // negate the start/end angles.
+      const startDeg = (-el.startAngle * 180) / Math.PI;
+      const endDegRaw = (-el.endAngle * 180) / Math.PI;
+      // DXF ARC sweeps CCW from start to end. We negated, so swap to
+      // restore the original sweep direction (canvas was CW visually).
+      const start = endDegRaw;
+      const end = startDeg;
+      entities.push(entityArc(
+        canvasXToDXF(el.center.x),
+        canvasYToDXF(el.center.y),
+        pxToFt(el.radius),
+        ((start % 360) + 360) % 360,
+        ((end % 360) + 360) % 360,
+        layerName,
+      ));
+      break;
+    }
+
+    case 'ellipse': {
+      // DXF ELLIPSE entity is well-defined but more involved (major-axis
+      // vector + minor:major ratio). For v1 we approximate with a 64-vertex
+      // closed polyline — every consumer (AutoCAD, LibreCAD, plotter
+      // drivers) handles polylines fine, and 64 vertices is visually
+      // smooth at typical print scales.
+      const SEG = 64;
+      const pts: Array<[number, number]> = [];
+      const rot = el.rotation ?? 0;
+      const cosR = Math.cos(rot);
+      const sinR = Math.sin(rot);
+      for (let i = 0; i < SEG; i++) {
+        const a = (i / SEG) * Math.PI * 2;
+        const lx = el.rx * Math.cos(a);
+        const ly = el.ry * Math.sin(a);
+        // Apply rotation, then translate to center
+        const wx = el.center.x + lx * cosR - ly * sinR;
+        const wy = el.center.y + lx * sinR + ly * cosR;
+        pts.push([canvasXToDXF(wx), canvasYToDXF(wy)]);
+      }
+      entities.push(entityLWPolyline(pts, true, layerName));
       break;
     }
 
