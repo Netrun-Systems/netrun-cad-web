@@ -479,6 +479,16 @@ function elementToEntities(el: CADElement, layerName: string): string[] {
       break;
     }
 
+    case 'polyline': {
+      if (el.points.length < 2) break;
+      const pts: Array<[number, number]> = el.points.map((p) => [
+        canvasXToDXF(p.x),
+        canvasYToDXF(p.y),
+      ]);
+      entities.push(entityLWPolyline(pts, !!el.closed, layerName));
+      break;
+    }
+
     case 'text': {
       const x = canvasXToDXF(el.position.x);
       const y = canvasYToDXF(el.position.y);

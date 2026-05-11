@@ -4,6 +4,7 @@ import type {
   CADLine,
   CADRectangle,
   CADCircle,
+  CADPolyline,
   CADDimension,
   FreehandStroke,
   TextElement,
@@ -240,6 +241,23 @@ function renderFreehand(ctx: CanvasRenderingContext2D, el: FreehandStroke) {
       drawFreehandPath(ctx, shifted, el.color, opacity * 0.2);
     }
   }
+}
+
+function renderPolyline(ctx: CanvasRenderingContext2D, el: CADPolyline) {
+  if (el.points.length < 2) return;
+  ctx.save();
+  ctx.strokeStyle = el.strokeColor;
+  ctx.lineWidth = el.strokeWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(el.points[0].x, el.points[0].y);
+  for (let i = 1; i < el.points.length; i++) {
+    ctx.lineTo(el.points[i].x, el.points[i].y);
+  }
+  if (el.closed && el.points.length >= 3) ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
 }
 
 function renderText(ctx: CanvasRenderingContext2D, el: TextElement) {
@@ -674,6 +692,9 @@ export function renderAll(
         break;
       case 'freehand':
         renderFreehand(ctx, el);
+        break;
+      case 'polyline':
+        renderPolyline(ctx, el);
         break;
       case 'text':
         renderText(ctx, el);

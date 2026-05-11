@@ -231,6 +231,27 @@ function renderElementBody(
         </>
       );
 
+    case 'polyline':
+      return (
+        <>
+          <SizeReadout label="Vertices" value={String(element.points.length)} />
+          <FieldRow label="Color">
+            <ColorField value={element.strokeColor} onChange={(v) => onUpdate({ ...element, strokeColor: v ?? '#ffffff' })} />
+          </FieldRow>
+          <FieldRow label="Width">
+            <SliderField value={element.strokeWidth} onChange={(v) => onUpdate({ ...element, strokeWidth: v })} min={1} max={8} />
+          </FieldRow>
+          <FieldRow label="Closed">
+            <input
+              type="checkbox"
+              checked={!!element.closed}
+              onChange={(e) => onUpdate({ ...element, closed: e.target.checked })}
+              className="w-4 h-4 accent-cad-highlight"
+            />
+          </FieldRow>
+        </>
+      );
+
     case 'text':
       return (
         <>
@@ -305,6 +326,7 @@ function elementLabel(element: CADElement): string {
     case 'line': return 'Line';
     case 'rectangle': return 'Rectangle';
     case 'circle': return 'Circle';
+    case 'polyline': return 'Polyline';
     case 'dimension': return 'Dimension';
     case 'freehand': return 'Freehand Stroke';
     case 'text': return 'Text';

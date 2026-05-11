@@ -14,7 +14,7 @@ export interface StrokePoint extends Point {
 
 export type AppMode = 'cad' | 'draw' | 'color' | 'text' | 'route' | 'diagram';
 
-export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move' | 'route';
+export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move' | 'route' | 'polyline';
 
 export type DrawBrush = 'pen' | 'pencil' | 'marker';
 export type ColorBrush = 'watercolor' | 'marker' | 'fill';
@@ -96,6 +96,19 @@ export interface CADCircle {
   strokeColor: string;
   strokeWidth: number;
   fillColor?: string;
+  metadata?: ElementMetadata;
+}
+
+export interface CADPolyline {
+  type: 'polyline';
+  id: string;
+  /** Connected vertices in order. Length >= 2. */
+  points: Point[];
+  /** When true, the last segment connects back to points[0]. */
+  closed?: boolean;
+  layerId: string;
+  strokeColor: string;
+  strokeWidth: number;
   metadata?: ElementMetadata;
 }
 
@@ -225,6 +238,7 @@ export type CADElement =
   | CADLine
   | CADRectangle
   | CADCircle
+  | CADPolyline
   | CADDimension
   | FreehandStroke
   | TextElement

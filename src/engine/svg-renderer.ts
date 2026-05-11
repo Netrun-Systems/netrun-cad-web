@@ -84,6 +84,13 @@ function dimensionSVG(el: CADDimension): string {
   ].join('');
 }
 
+function polylineSVG(el: import('./types').CADPolyline): string {
+  if (el.points.length < 2) return '';
+  const pts = el.points.map((p) => `${fmt(p.x)},${fmt(p.y)}`).join(' ');
+  const tag = el.closed && el.points.length >= 3 ? 'polygon' : 'polyline';
+  return `<${tag} points="${pts}" fill="none" stroke="${el.strokeColor}" stroke-width="${el.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
 function freehandSVG(el: FreehandStroke): string {
   if (el.points.length === 0) return '';
   const strokePoints = el.points.map((p) => [p.x, p.y, p.pressure]);
@@ -270,6 +277,7 @@ function elementSVG(el: CADElement, pixelsPerUnit: number): string {
     case 'line': return lineSVG(el);
     case 'rectangle': return rectSVG(el);
     case 'circle': return circleSVG(el);
+    case 'polyline': return polylineSVG(el);
     case 'dimension': return dimensionSVG(el);
     case 'freehand': return freehandSVG(el);
     case 'text': return textSVG(el);

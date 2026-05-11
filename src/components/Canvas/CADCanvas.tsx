@@ -50,7 +50,7 @@ import { CommandLine } from '../CommandLine/CommandLine';
 import { ContextMenu, type ContextMenuEntry } from '../ContextMenu/ContextMenu';
 import { StatusBar } from '../StatusBar/StatusBar';
 import { findCommand, getShortAlias } from '../../engine/commands';
-import { findElementAt, moveElement, getBoundingBox } from '../../engine/selection';
+import { findElementAt, moveElement, getBoundingBox, hitHandle, anchorForHandle, scaleElement, cursorForHandle, type ResizeHandle } from '../../engine/selection';
 import { HelpPanel } from '../HelpPanel/HelpPanel';
 import { InteriorPanel } from '../InteriorPanel/InteriorPanel';
 import type { PlacingSymbol } from '../InteriorPanel/InteriorPanel';
@@ -177,6 +177,21 @@ export const CADCanvas: React.FC = () => {
   // Element selection (select tool)
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const dragStartRef = useRef<Point | null>(null);
+
+  // Resize-by-handle state. Set on pointerdown if the user grabs one of
+  // the four corner handles drawn around the selected element. Cleared
+  // on pointerup. While set, pointermove computes new sx/sy relative to
+  // `anchor` and `dx0/dy0` and applies scaleElement to `startElement`.
+  const resizeRef = useRef<{
+    handle: ResizeHandle;
+    anchor: Point;
+    dx0: number;
+    dy0: number;
+    startElement: import('../../engine/types').CADElement;
+  } | null>(null);
+
+  // Live cursor hint for hovering over a resize handle (without dragging).
+  const [hoverHandle, setHoverHandle] = useState<ResizeHandle | null>(null);
   const dragElementStartRef = useRef<Point | null>(null);
 
   // Annotation-to-deviation links (Apple Pencil annotations near deviation markers)
@@ -474,9 +489,9 @@ export const CADCanvas: React.FC = () => {
         case 'tool:dimension':   setMode('cad'); setCadTool('dimension');setLastDrawTool('dimension'); break;
         case 'tool:select':      setMode('cad'); setCadTool('select');      break;
         case 'tool:move':        setMode('cad'); setCadTool('move');        break;
+        case 'tool:polyline':    setMode('cad'); setCadTool('polyline'); setLastDrawTool('polyline'); break;
 
         // Unimplemented CAD tools — acknowledge but no-op until implemented
-        case 'tool:polyline':
         case 'tool:arc':
         case 'tool:ellipse':
         case 'tool:spline':
@@ -737,7 +752,7 @@ export const CADCanvas: React.FC = () => {
   );
 
   // ── CAD tools ──────────────────────────────────────────────────────────────
-  const { handleCADDown, handleCADMove, handleCADUp, pendingInput, handleNumericInput, cancelPending } = useCADTools({
+  const { handleCADDown, handleCADMove, handleCADUp, pendingInput, handleNumericInput, cancelPending, commitPolyline } = useCADTools({
     activeTool: cadTool,
     activeLayerId: getActiveLayer(),
     grid,
@@ -835,7 +850,31 @@ export const CADCanvas: React.FC = () => {
     (point: StrokePoint) => {
       if (mode === 'cad') {
         if (cadTool === 'select') {
-          // Hit test for element selection
+          // 1. Resize handle hit-test takes priority over element hit-test.
+          //    Without this, grabbing a corner handle would re-select the
+          //    underlying element and start a drag-to-move instead.
+          if (selectedElementId) {
+            const sel = elements.find((e) => e.id === selectedElementId);
+            if (sel) {
+              const bb = getBoundingBox(sel);
+              const handle = hitHandle(bb, point, view.zoom);
+              if (handle) {
+                const anchor = anchorForHandle(bb, handle);
+                const dx0 = point.x - anchor.x;
+                const dy0 = point.y - anchor.y;
+                resizeRef.current = {
+                  handle,
+                  anchor,
+                  // Floor magnitudes to avoid div-by-zero on the unused axis
+                  dx0: Math.abs(dx0) < 1 ? Math.sign(dx0 || 1) : dx0,
+                  dy0: Math.abs(dy0) < 1 ? Math.sign(dy0 || 1) : dy0,
+                  startElement: sel,
+                };
+                return;
+              }
+            }
+          }
+          // 2. Otherwise normal element hit-test
           const hit = findElementAt(elements, point, view.zoom);
           if (hit) {
             setSelectedElementId(hit.id);
@@ -907,6 +946,31 @@ export const CADCanvas: React.FC = () => {
       setCursorX(point.x);
       setCursorY(point.y);
 
+      // ── Resize-by-handle takes priority over drag-to-move ──
+      if (resizeRef.current && selectedElementId) {
+        const { anchor, dx0, dy0, startElement } = resizeRef.current;
+        const sx = (point.x - anchor.x) / dx0;
+        const sy = (point.y - anchor.y) / dy0;
+        setElements((prev) =>
+          prev.map((el) =>
+            el.id === selectedElementId ? scaleElement(startElement, anchor, sx, sy) : el,
+          ),
+        );
+        return;
+      }
+
+      // Cursor hint while hovering a handle (no drag in progress)
+      if (mode === 'cad' && cadTool === 'select' && selectedElementId && !dragStartRef.current) {
+        const sel = elements.find((e) => e.id === selectedElementId);
+        if (sel) {
+          const bb = getBoundingBox(sel);
+          const handle = hitHandle(bb, point, view.zoom);
+          if (handle !== hoverHandle) setHoverHandle(handle);
+        }
+      } else if (hoverHandle) {
+        setHoverHandle(null);
+      }
+
       const isSelectDrag = dragStartRef.current && (
         (mode === 'cad' && cadTool === 'select') ||
         (mode === 'diagram' && diagramTool === 'select')
@@ -944,6 +1008,11 @@ export const CADCanvas: React.FC = () => {
   );
 
   const onStrokeEnd = useCallback((point?: StrokePoint) => {
+    // Finalize a resize drag — push history once, after the user lets go.
+    if (resizeRef.current) {
+      resizeRef.current = null;
+      setHistoryState((h) => pushState(h, elements));
+    }
     dragStartRef.current = null;
     dragElementStartRef.current = null;
     if (isPanningRef.current) {
@@ -957,7 +1026,7 @@ export const CADCanvas: React.FC = () => {
     } else if (mode === 'draw' || mode === 'color') {
       handleDrawEnd();
     }
-  }, [mode, handleCADUp, handleDiagramUp, handleDrawEnd, endPan]);
+  }, [mode, handleCADUp, handleDiagramUp, handleDrawEnd, endPan, elements]);
 
   // Pointer events hook
   const { handlePointerDown: ptrDown, handlePointerMove: ptrMove, handlePointerUp: ptrUp } =
@@ -1224,6 +1293,11 @@ export const CADCanvas: React.FC = () => {
       // ── Enter → focus command line ───────────────────────────────────────
       if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
+        // Polyline tool: Enter finishes the in-progress polyline
+        if (mode === 'cad' && cadTool === 'polyline' && pendingInput?.tool === 'polyline') {
+          commitPolyline();
+          return;
+        }
         // Repeat last command on Enter if nothing typed
         if (lastAction) {
           executeCommand(lastAction);
@@ -1372,7 +1446,7 @@ export const CADCanvas: React.FC = () => {
 
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool, selectedElementId, nudgeSelected]);
+  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool, selectedElementId, nudgeSelected, cadTool, commitPolyline]);
 
   // ── Compute canvas dimensions based on layout ────────────────────────────
   const sidePanelWidth = sidePanelCollapsed
@@ -1908,7 +1982,9 @@ export const CADCanvas: React.FC = () => {
           width: `${canvasWidth}px`,
           height: `${canvasHeight}px`,
           cursor: mode === 'cad'
-            ? (cadTool === 'select' ? (selectedElementId ? 'move' : 'default') : cadTool === 'move' ? 'grab' : 'crosshair')
+            ? (cadTool === 'select'
+                ? (hoverHandle ? cursorForHandle(hoverHandle) : selectedElementId ? 'move' : 'default')
+                : cadTool === 'move' ? 'grab' : 'crosshair')
             : mode === 'draw' || mode === 'color'
               ? 'default'
               : 'text',

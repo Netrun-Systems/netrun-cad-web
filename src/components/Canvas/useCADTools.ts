@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import type { CADTool, CADElement, CADLine, CADRectangle, CADCircle, CADDimension, Point, GridSettings } from '../../engine/types';
+import type { CADTool, CADElement, CADLine, CADRectangle, CADCircle, CADDimension, CADPolyline, Point, GridSettings } from '../../engine/types';
 import { snapToGrid, distance, angle } from '../../engine/geometry';
 
 let nextId = 1;
@@ -99,6 +99,11 @@ export function useCADTools({
   const dimPhaseRef = useRef(0);
   const dimP1Ref = useRef<Point | null>(null);
   const dimP2Ref = useRef<Point | null>(null);
+
+  // For polyline tool: accumulate vertices across multiple clicks until
+  // the user presses Enter/Esc. Lives in a ref so that mid-stream clicks
+  // append without React state thrashing.
+  const polylinePointsRef = useRef<Point[]>([]);
 
   /** Apply ortho constraint: snap angle to nearest 90 degrees */
   const applyOrtho = useCallback((start: Point, end: Point): Point => {
@@ -202,6 +207,23 @@ export function useCADTools({
           return;
         }
 
+        return;
+      }
+
+      // ─── Polyline: multi-click accumulation, finalized on Enter/Esc ────
+      if (activeTool === 'polyline') {
+        polylinePointsRef.current.push(point);
+        const count = polylinePointsRef.current.length;
+        setPendingInput({
+          tool: 'polyline',
+          startPoint: polylinePointsRef.current[0],
+          mousePoint: point,
+          phase: count,
+          prompt:
+            count === 1
+              ? 'Specify next point or press Enter to finish:'
+              : `Polyline: ${count} points — Enter to finish, Esc to cancel`,
+        });
         return;
       }
 
@@ -340,6 +362,22 @@ export function useCADTools({
           onPreviewChange(preview);
         }
 
+        return;
+      }
+
+      // ─── Polyline preview: existing segments + live segment to cursor ──
+      if (activeTool === 'polyline' && polylinePointsRef.current.length > 0) {
+        const livePoints = [...polylinePointsRef.current, point];
+        const preview: CADPolyline = {
+          type: 'polyline',
+          id: '__preview__',
+          points: livePoints,
+          layerId: activeLayerId,
+          strokeColor,
+          strokeWidth,
+        };
+        onPreviewChange(preview);
+        setPendingInput((prev) => (prev ? { ...prev, mousePoint: point } : null));
         return;
       }
 
@@ -535,9 +573,35 @@ export function useCADTools({
     dimPhaseRef.current = 0;
     dimP1Ref.current = null;
     dimP2Ref.current = null;
+    polylinePointsRef.current = [];
     setPendingInput(null);
     onPreviewChange(null);
   }, [onPreviewChange]);
+
+  /**
+   * Commit the in-progress polyline. Called by CADCanvas on Enter (or any
+   * other "finish" gesture). No-op if fewer than 2 points have been placed.
+   */
+  const commitPolyline = useCallback(() => {
+    if (polylinePointsRef.current.length < 2) {
+      polylinePointsRef.current = [];
+      setPendingInput(null);
+      onPreviewChange(null);
+      return;
+    }
+    const el: CADPolyline = {
+      type: 'polyline',
+      id: genId('pline'),
+      points: polylinePointsRef.current.slice(),
+      layerId: activeLayerId,
+      strokeColor,
+      strokeWidth,
+    };
+    onElementCreated(el);
+    polylinePointsRef.current = [];
+    setPendingInput(null);
+    onPreviewChange(null);
+  }, [activeLayerId, strokeColor, strokeWidth, onElementCreated, onPreviewChange]);
 
   return {
     handleCADDown,
@@ -547,5 +611,6 @@ export function useCADTools({
     pendingInput,
     handleNumericInput,
     cancelPending,
+    commitPolyline,
   };
 }

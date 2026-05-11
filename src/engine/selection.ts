@@ -62,6 +62,18 @@ export function hitTest(element: CADElement, point: Point, zoom: number): boolea
       return false;
     }
 
+    case 'polyline': {
+      const pts = element.points;
+      for (let i = 1; i < pts.length; i++) {
+        if (distToSegment(point, pts[i - 1], pts[i]) < tol) return true;
+      }
+      // Closing edge if marked closed
+      if (element.closed && pts.length >= 3) {
+        if (distToSegment(point, pts[pts.length - 1], pts[0]) < tol) return true;
+      }
+      return false;
+    }
+
     case 'text': {
       // Approximate text bounding box (rough: 8px per char width, fontSize height)
       const w = element.content.length * element.fontSize * 0.6;
@@ -133,9 +145,160 @@ export function moveElement(element: CADElement, dx: number, dy: number): CADEle
       return { ...element, position: { x: element.position.x + dx, y: element.position.y + dy } };
     case 'freehand':
       return { ...element, points: element.points.map(p => ({ ...p, x: p.x + dx, y: p.y + dy })) };
+    case 'polyline':
+      return { ...element, points: element.points.map(p => ({ x: p.x + dx, y: p.y + dy })) };
     default:
       return element;
   }
+}
+
+/**
+ * Scale a point around an anchor by independent X/Y factors.
+ */
+function scalePoint(p: Point, anchor: Point, sx: number, sy: number): Point {
+  return {
+    x: anchor.x + (p.x - anchor.x) * sx,
+    y: anchor.y + (p.y - anchor.y) * sy,
+  };
+}
+
+/** Minimum size in canvas px below which we refuse to shrink an element. */
+const MIN_SIZE = 4;
+
+/**
+ * Scale an element around `anchor` by `(sx, sy)`. Returns a new element
+ * (immutable). Element-type specifics:
+ *  - line/dimension/freehand/polyline: scale all points
+ *  - rectangle: scale origin + dimensions, flipping if a factor goes negative
+ *  - circle: scale center, multiply radius by max(|sx|, |sy|) (uniform)
+ *  - text: scale position, multiply fontSize by avg
+ *  - plant: scale position, multiply scale field by avg
+ *  - interior-symbol: scale position, multiply width by sx, depth by sy
+ *
+ * Factors clamp such that the resulting bounding box stays at least
+ * MIN_SIZE in each axis (prevents zero/negative dimensions during a drag
+ * past the anchor).
+ */
+export function scaleElement(
+  element: CADElement,
+  anchor: Point,
+  sxRaw: number,
+  syRaw: number,
+): CADElement {
+  // Allow flipping (negative sx/sy) but clamp magnitudes so we never end
+  // up with degenerate < MIN_SIZE dimensions.
+  const sx = Math.abs(sxRaw) < 0.05 ? Math.sign(sxRaw || 1) * 0.05 : sxRaw;
+  const sy = Math.abs(syRaw) < 0.05 ? Math.sign(syRaw || 1) * 0.05 : syRaw;
+  const avg = (Math.abs(sx) + Math.abs(sy)) / 2;
+
+  switch (element.type) {
+    case 'line':
+    case 'dimension': {
+      const p1 = scalePoint(element.p1, anchor, sx, sy);
+      const p2 = scalePoint(element.p2, anchor, sx, sy);
+      return { ...element, p1, p2 };
+    }
+    case 'rectangle': {
+      const corner = { x: element.origin.x + element.width, y: element.origin.y + element.height };
+      const newOrigin = scalePoint(element.origin, anchor, sx, sy);
+      const newCorner = scalePoint(corner, anchor, sx, sy);
+      const minX = Math.min(newOrigin.x, newCorner.x);
+      const minY = Math.min(newOrigin.y, newCorner.y);
+      const w = Math.max(MIN_SIZE, Math.abs(newCorner.x - newOrigin.x));
+      const h = Math.max(MIN_SIZE, Math.abs(newCorner.y - newOrigin.y));
+      return { ...element, origin: { x: minX, y: minY }, width: w, height: h };
+    }
+    case 'circle': {
+      const newCenter = scalePoint(element.center, anchor, sx, sy);
+      const newRadius = Math.max(MIN_SIZE / 2, element.radius * Math.max(Math.abs(sx), Math.abs(sy)));
+      return { ...element, center: newCenter, radius: newRadius };
+    }
+    case 'freehand':
+      return { ...element, points: element.points.map((p) => ({ ...p, ...scalePoint(p, anchor, sx, sy) })) };
+    case 'polyline':
+      return { ...element, points: element.points.map((p) => scalePoint(p, anchor, sx, sy)) };
+    case 'text': {
+      const newPos = scalePoint(element.position, anchor, sx, sy);
+      const newSize = Math.max(6, element.fontSize * avg);
+      return { ...element, position: newPos, fontSize: newSize };
+    }
+    case 'plant': {
+      const newPos = scalePoint(element.position, anchor, sx, sy);
+      return { ...element, position: newPos, scale: Math.max(0.1, element.scale * avg) };
+    }
+    case 'interior-symbol': {
+      const newPos = scalePoint(element.position, anchor, sx, sy);
+      return {
+        ...element,
+        position: newPos,
+        width: Math.max(0.1, element.width * Math.abs(sx)),
+        depth: Math.max(0.1, element.depth * Math.abs(sy)),
+      };
+    }
+    case 'flowchart-shape':
+    case 'container': {
+      const corner = { x: element.origin.x + element.width, y: element.origin.y + element.height };
+      const newOrigin = scalePoint(element.origin, anchor, sx, sy);
+      const newCorner = scalePoint(corner, anchor, sx, sy);
+      const minX = Math.min(newOrigin.x, newCorner.x);
+      const minY = Math.min(newOrigin.y, newCorner.y);
+      const w = Math.max(MIN_SIZE, Math.abs(newCorner.x - newOrigin.x));
+      const h = Math.max(MIN_SIZE, Math.abs(newCorner.y - newOrigin.y));
+      return { ...element, origin: { x: minX, y: minY }, width: w, height: h };
+    }
+    default:
+      return element; // connector — not user-resizable
+  }
+}
+
+/** A corner-handle identifier for the bounding-box resize affordances. */
+export type ResizeHandle = 'tl' | 'tr' | 'bl' | 'br';
+
+/**
+ * Hit-test the four corner handles drawn around a selected element's
+ * bounding box. Returns the handle name or null.
+ *
+ * Padding + handle size mirror what CADCanvas's render loop draws:
+ *   pad = 4 / zoom, handle = 4 / zoom (so an 8-px square)
+ */
+export function hitHandle(
+  bbox: { x: number; y: number; width: number; height: number },
+  point: Point,
+  zoom: number,
+): ResizeHandle | null {
+  const pad = 4 / zoom;
+  const hs = 6 / zoom; // generous tap target — handles drawn at 4/zoom
+  const corners: Array<[ResizeHandle, number, number]> = [
+    ['tl', bbox.x - pad,                bbox.y - pad],
+    ['tr', bbox.x + bbox.width + pad,   bbox.y - pad],
+    ['bl', bbox.x - pad,                bbox.y + bbox.height + pad],
+    ['br', bbox.x + bbox.width + pad,   bbox.y + bbox.height + pad],
+  ];
+  for (const [name, hx, hy] of corners) {
+    if (Math.abs(point.x - hx) <= hs && Math.abs(point.y - hy) <= hs) return name;
+  }
+  return null;
+}
+
+/**
+ * Given a handle, return the opposite-corner anchor of the bounding box.
+ * That anchor stays fixed during a resize drag.
+ */
+export function anchorForHandle(
+  bbox: { x: number; y: number; width: number; height: number },
+  handle: ResizeHandle,
+): Point {
+  switch (handle) {
+    case 'tl': return { x: bbox.x + bbox.width, y: bbox.y + bbox.height };
+    case 'tr': return { x: bbox.x,              y: bbox.y + bbox.height };
+    case 'bl': return { x: bbox.x + bbox.width, y: bbox.y };
+    case 'br': return { x: bbox.x,              y: bbox.y };
+  }
+}
+
+/** CSS cursor name for the given handle (matches diagonal direction). */
+export function cursorForHandle(handle: ResizeHandle): string {
+  return handle === 'tl' || handle === 'br' ? 'nwse-resize' : 'nesw-resize';
 }
 
 /** Get the bounding box of an element for highlight rendering. */
@@ -167,6 +330,13 @@ export function getBoundingBox(element: CADElement): { x: number; y: number; wid
       return { x: element.position.x - w / 2, y: element.position.y - d / 2, width: w, height: d };
     }
     case 'freehand': {
+      const xs = element.points.map(p => p.x);
+      const ys = element.points.map(p => p.y);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
+    }
+    case 'polyline': {
       const xs = element.points.map(p => p.x);
       const ys = element.points.map(p => p.y);
       const minX = Math.min(...xs);
