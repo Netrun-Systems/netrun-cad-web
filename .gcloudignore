@@ -1,4 +1,10 @@
-# Based on default but includes .env.production (needed for Vite build)
+# Cloud Build context — what gets uploaded to gcloud builds submit.
+# Production credentials are injected via Dockerfile --build-arg
+# (VITE_GOOGLE_CLIENT_ID, VITE_GOOGLE_API_KEY, VITE_API_URL, VITE_WS_URL)
+# pulled from Secret Manager at submit time. We intentionally exclude
+# all .env files so a stale local copy can never override the build
+# args or leak into the bundle.
+
 .git
 .gitignore
 .gcloudignore
@@ -6,8 +12,10 @@ node_modules/
 dist/
 .DS_Store
 *.log
-# Keep .env.production — Vite reads it at build time
-# (it IS sensitive, but it only contains Google Drive client IDs which
-# are public per OAuth flow design; the secret is NOT sensitive on the
-# same level as a private key)
-!.env.production
+
+# Local dev / agent state — never ship to the build context
+.claude/
+.env
+.env.*
+NETRUN_CAD_WEB_WHITEPAPER_v1.0.md
+DESIGN.md
