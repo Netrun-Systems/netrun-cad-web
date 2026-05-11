@@ -50,7 +50,7 @@ import { CommandLine } from '../CommandLine/CommandLine';
 import { ContextMenu, type ContextMenuEntry } from '../ContextMenu/ContextMenu';
 import { StatusBar } from '../StatusBar/StatusBar';
 import { findCommand, getShortAlias } from '../../engine/commands';
-import { findElementAt, moveElement, getBoundingBox, hitHandle, anchorForHandle, scaleElement, cursorForHandle, type ResizeHandle } from '../../engine/selection';
+import { findElementAt, moveElement, getBoundingBox, hitHandle, anchorForHandle, scaleElement, cursorForHandle, findElementsInRect, type ResizeHandle } from '../../engine/selection';
 import { HelpPanel } from '../HelpPanel/HelpPanel';
 import { InteriorPanel } from '../InteriorPanel/InteriorPanel';
 import type { PlacingSymbol } from '../InteriorPanel/InteriorPanel';
@@ -91,6 +91,7 @@ import { linkAnnotationToDeviation, type LinkedAnnotation } from '../../engine/a
 import { RouteTutorialOverlay } from '../RouteEditor/RouteTutorialOverlay';
 import { OfflineIndicator } from '../OfflineIndicator/OfflineIndicator';
 import PropertyPanel from '../PropertyPanel/PropertyPanel';
+import MultiPropertyPanel from '../PropertyPanel/MultiPropertyPanel';
 import PlantSchedulePanel from '../PlantSchedule/PlantSchedulePanel';
 import { cacheProject } from '../../services/offline-storage';
 
@@ -175,7 +176,38 @@ export const CADCanvas: React.FC = () => {
   const [placingInteriorSymbol, setPlacingInteriorSymbol] = useState<PlacingSymbol | null>(null);
 
   // Element selection (select tool)
-  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  // Multi-select state. selectedIds is the source of truth — any number of
+  // elements can be selected at once. selectedElementId is kept as a derived
+  // value (= the single id when exactly one is selected, else null) so all
+  // existing code that operates on a single selection (resize handles,
+  // PropertyPanel single-element view, linked-deviation cross-highlight)
+  // keeps working without per-call-site changes.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectedElementId = selectedIds.size === 1 ? selectedIds.values().next().value as string : null;
+  const setSelectedElementId = useCallback((id: string | null) => {
+    setSelectedIds(id ? new Set([id]) : new Set());
+  }, []);
+
+  // Marquee-drag (rectangle selection) state. Active while the user is
+  // dragging on empty canvas with the select tool. On pointerup, all
+  // elements fully enclosed by the rectangle become selected.
+  const marqueeRef = useRef<{ start: Point; current: Point; additive: boolean } | null>(null);
+  // Re-render trigger for the in-progress marquee preview.
+  const [marqueeTick, setMarqueeTick] = useState(0);
+
+  // Shift-key tracker — usePointerEvents doesn't propagate modifier state,
+  // so we keep our own ref and read it inside pointer handlers.
+  const shiftDownRef = useRef(false);
+  useEffect(() => {
+    const onDown = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftDownRef.current = true; };
+    const onUp = (e: KeyboardEvent) => { if (e.key === 'Shift') shiftDownRef.current = false; };
+    window.addEventListener('keydown', onDown);
+    window.addEventListener('keyup', onUp);
+    return () => {
+      window.removeEventListener('keydown', onDown);
+      window.removeEventListener('keyup', onUp);
+    };
+  }, []);
   const dragStartRef = useRef<Point | null>(null);
 
   // Resize-by-handle state. Set on pointerdown if the user grabs one of
@@ -416,22 +448,22 @@ export const CADCanvas: React.FC = () => {
     });
   }, []);
 
-  // Delete last element
+  // Delete selected elements (all of them, not just the single one).
+  // Falls back to "delete the last placed element" when nothing is
+  // selected — preserves the long-standing AutoCAD-ish Backspace behavior.
   const doDelete = useCallback(() => {
     setElements((prev) => {
       let next: typeof prev;
-      if (selectedElementId) {
-        // Delete the selected element
-        next = prev.filter((el) => el.id !== selectedElementId);
-        setSelectedElementId(null);
+      if (selectedIds.size > 0) {
+        next = prev.filter((el) => !selectedIds.has(el.id));
+        setSelectedIds(new Set());
       } else {
-        // No selection — delete the last element (legacy behavior)
         next = prev.slice(0, -1);
       }
       setHistoryState((h) => pushState(h, next));
       return next;
     });
-  }, [selectedElementId]);
+  }, [selectedIds]);
 
   // Replace the selected element with an updated version (color, width, layer, etc.)
   const handleUpdateSelected = useCallback((next: import('../../engine/types').CADElement) => {
@@ -467,15 +499,15 @@ export const CADCanvas: React.FC = () => {
     [selectedElementId],
   );
 
-  // Nudge selected element by N pixels in canvas space.
+  // Nudge ALL selected elements by N pixels in canvas space.
   const nudgeSelected = useCallback((dx: number, dy: number) => {
-    if (!selectedElementId) return;
+    if (selectedIds.size === 0) return;
     setElements((prev) => {
-      const next = prev.map((el) => (el.id === selectedElementId ? moveElement(el, dx, dy) : el));
+      const next = prev.map((el) => (selectedIds.has(el.id) ? moveElement(el, dx, dy) : el));
       setHistoryState((h) => pushState(h, next));
       return next;
     });
-  }, [selectedElementId]);
+  }, [selectedIds]);
 
   // ── executeCommand — maps action IDs to real state changes ────────────────
   const executeCommand = useCallback(
@@ -876,19 +908,34 @@ export const CADCanvas: React.FC = () => {
           }
           // 2. Otherwise normal element hit-test
           const hit = findElementAt(elements, point, view.zoom);
+          const shift = shiftDownRef.current;
           if (hit) {
-            setSelectedElementId(hit.id);
-            dragStartRef.current = { x: point.x, y: point.y };
-            // Store the element's initial position for smooth dragging
-            const bb = getBoundingBox(hit);
-            dragElementStartRef.current = { x: bb.x, y: bb.y };
+            if (shift) {
+              // Toggle the hit element in/out of the selection set
+              setSelectedIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(hit.id)) next.delete(hit.id);
+                else next.add(hit.id);
+                return next;
+              });
+              // Don't init a drag on shift-click — toggling is the gesture
+            } else {
+              // Normal click: if the hit is already part of a multi-selection
+              // keep the whole set (so the user can drag the group). Otherwise
+              // select only this element.
+              setSelectedIds((prev) => (prev.has(hit.id) ? prev : new Set([hit.id])));
+              dragStartRef.current = { x: point.x, y: point.y };
+              const bb = getBoundingBox(hit);
+              dragElementStartRef.current = { x: bb.x, y: bb.y };
+            }
           } else {
-            setSelectedElementId(null);
-            // No element hit — pan instead
-            isPanningRef.current = true;
-            const canvas = canvasRef.current!;
-            const rect = canvas.getBoundingClientRect();
-            startPan(point.x * view.zoom + view.offsetX + rect.left, point.y * view.zoom + view.offsetY + rect.top);
+            // Empty canvas — start a marquee. Use shift to add to existing
+            // selection; otherwise clear first. (Pan in select mode is
+            // intentionally disabled — switch to Move tool or use two-finger
+            // pan / mouse wheel.)
+            if (!shift) setSelectedIds(new Set());
+            marqueeRef.current = { start: point, current: point, additive: shift };
+            setMarqueeTick((t) => t + 1);
           }
         } else if (cadTool === 'move') {
           isPanningRef.current = true;
@@ -946,6 +993,13 @@ export const CADCanvas: React.FC = () => {
       setCursorX(point.x);
       setCursorY(point.y);
 
+      // ── Marquee selection in progress ──
+      if (marqueeRef.current) {
+        marqueeRef.current.current = point;
+        setMarqueeTick((t) => t + 1);
+        return;
+      }
+
       // ── Resize-by-handle takes priority over drag-to-move ──
       if (resizeRef.current && selectedElementId) {
         const { anchor, dx0, dy0, startElement } = resizeRef.current;
@@ -976,17 +1030,17 @@ export const CADCanvas: React.FC = () => {
         (mode === 'diagram' && diagramTool === 'select')
       );
 
-      if (selectedElementId && isSelectDrag) {
+      if (selectedIds.size > 0 && isSelectDrag) {
         const dx = point.x - dragStartRef.current!.x;
         const dy = point.y - dragStartRef.current!.y;
         if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
           setElements((prev) => {
             const next = prev.map((el) =>
-              el.id === selectedElementId ? moveElement(el, dx, dy) : el
+              selectedIds.has(el.id) ? moveElement(el, dx, dy) : el
             );
             // If a flowchart shape moved, re-route any connectors attached to it
             if (mode === 'diagram') {
-              return reRouteConnectors(next, new Set([selectedElementId]));
+              return reRouteConnectors(next, selectedIds);
             }
             return next;
           });
@@ -1008,6 +1062,35 @@ export const CADCanvas: React.FC = () => {
   );
 
   const onStrokeEnd = useCallback((point?: StrokePoint) => {
+    // Commit a marquee selection — find every element fully enclosed and
+    // either replace the selection (no shift) or add to it (shift held).
+    if (marqueeRef.current) {
+      const m = marqueeRef.current;
+      const rect = {
+        x: Math.min(m.start.x, m.current.x),
+        y: Math.min(m.start.y, m.current.y),
+        width: Math.abs(m.current.x - m.start.x),
+        height: Math.abs(m.current.y - m.start.y),
+      };
+      // Tiny marquee (< 4 canvas px in either axis) is treated as a click
+      // on empty canvas — just clear the marquee state, leave selection alone.
+      if (rect.width >= 4 && rect.height >= 4) {
+        const matched = findElementsInRect(elements, rect);
+        const matchedIds = matched.map((e) => e.id);
+        if (m.additive) {
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            for (const id of matchedIds) next.add(id);
+            return next;
+          });
+        } else {
+          setSelectedIds(new Set(matchedIds));
+        }
+      }
+      marqueeRef.current = null;
+      setMarqueeTick((t) => t + 1);
+    }
+
     // Finalize a resize drag — push history once, after the user lets go.
     if (resizeRef.current) {
       resizeRef.current = null;
@@ -1617,18 +1700,28 @@ export const CADCanvas: React.FC = () => {
           renderSnapIndicator(ctx, snapInd, view.zoom);
         }
 
-        // Draw selection highlight
+        // Draw a dashed bounding-box highlight around every selected element.
+        // (Resize handles are only drawn when exactly 1 element is selected
+        // — multi-resize would need a union bbox which is a v2 feature.)
+        if (selectedIds.size > 0) {
+          const pad = 4 / view.zoom;
+          ctx.strokeStyle = '#3b82f6';
+          ctx.lineWidth = 2 / view.zoom;
+          ctx.setLineDash([6 / view.zoom, 4 / view.zoom]);
+          for (const el of elements) {
+            if (!selectedIds.has(el.id)) continue;
+            const bb = getBoundingBox(el);
+            ctx.strokeRect(bb.x - pad, bb.y - pad, bb.width + pad * 2, bb.height + pad * 2);
+          }
+          ctx.setLineDash([]);
+        }
+
         if (selectedElementId) {
           const selEl = elements.find((e) => e.id === selectedElementId);
           if (selEl) {
             const bb = getBoundingBox(selEl);
             const pad = 4 / view.zoom;
-            ctx.strokeStyle = '#3b82f6';
-            ctx.lineWidth = 2 / view.zoom;
-            ctx.setLineDash([6 / view.zoom, 4 / view.zoom]);
-            ctx.strokeRect(bb.x - pad, bb.y - pad, bb.width + pad * 2, bb.height + pad * 2);
-            ctx.setLineDash([]);
-            // Corner handles
+            // Corner handles (single-selection only)
             const hs = 4 / view.zoom;
             ctx.fillStyle = '#3b82f6';
             for (const [hx, hy] of [
@@ -1672,6 +1765,22 @@ export const CADCanvas: React.FC = () => {
           }
         }
 
+        // Marquee selection preview (semi-transparent blue rect with dashed border)
+        if (marqueeRef.current) {
+          const m = marqueeRef.current;
+          const x = Math.min(m.start.x, m.current.x);
+          const y = Math.min(m.start.y, m.current.y);
+          const w = Math.abs(m.current.x - m.start.x);
+          const h = Math.abs(m.current.y - m.start.y);
+          ctx.fillStyle = 'rgba(59, 130, 246, 0.10)';
+          ctx.fillRect(x, y, w, h);
+          ctx.strokeStyle = '#3b82f6';
+          ctx.lineWidth = 1 / view.zoom;
+          ctx.setLineDash([4 / view.zoom, 3 / view.zoom]);
+          ctx.strokeRect(x, y, w, h);
+          ctx.setLineDash([]);
+        }
+
         ctx.restore();
       }
 
@@ -1680,7 +1789,7 @@ export const CADCanvas: React.FC = () => {
 
     animFrameRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animFrameRef.current);
-  }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap, pendingInput, cadTool, cursorX, cursorY, selectedElementId, annotationLinks]);
+  }, [elements, preview, liveStrokePoints, layers, view, grid, mode, penColor, penSize, penOpacity, colorColor, colorSize, colorOpacity, colorBrush, selectedPlantId, basemap, pendingInput, cadTool, cursorX, cursorY, selectedElementId, selectedIds, marqueeTick, annotationLinks]);
 
   // ── localStorage + IndexedDB persistence ────────────────────────────────────
   useEffect(() => {
@@ -2079,7 +2188,9 @@ export const CADCanvas: React.FC = () => {
         />
       )}
 
-      {/* Property panel for the selected element */}
+      {/* Property panel — single-element editor when 1 selected, group
+          editor when 2+. Resize handles render only in the single case
+          (multi-resize requires a union bbox; that's a v2 feature). */}
       {selectedElementId && (() => {
         const el = elements.find((e) => e.id === selectedElementId);
         if (!el) return null;
@@ -2091,6 +2202,45 @@ export const CADCanvas: React.FC = () => {
             onDelete={doDelete}
             onReorder={handleReorderSelected}
             onClose={() => setSelectedElementId(null)}
+          />
+        );
+      })()}
+      {selectedIds.size >= 2 && (() => {
+        const selEls = elements.filter((e) => selectedIds.has(e.id));
+        if (selEls.length === 0) return null;
+        const applyToAll = (apply: (el: import('../../engine/types').CADElement) => import('../../engine/types').CADElement) => {
+          setElements((prev) => {
+            const next = prev.map((el) => (selectedIds.has(el.id) ? apply(el) : el));
+            setHistoryState((h) => pushState(h, next));
+            return next;
+          });
+        };
+        return (
+          <MultiPropertyPanel
+            elements={selEls}
+            layers={layers}
+            onLayerChange={(layerId) => applyToAll((el) => ({ ...el, layerId } as import('../../engine/types').CADElement))}
+            onColorChange={(color) => applyToAll((el) => {
+              switch (el.type) {
+                case 'line':
+                case 'rectangle':
+                case 'circle':
+                case 'polyline':
+                  return { ...el, strokeColor: color };
+                case 'freehand':
+                case 'text':
+                  return { ...el, color };
+                case 'interior-symbol':
+                  return { ...el, color };
+                case 'flowchart-shape':
+                case 'container':
+                  return { ...el, strokeColor: color };
+                default:
+                  return el;
+              }
+            })}
+            onDeleteAll={doDelete}
+            onClose={() => setSelectedIds(new Set())}
           />
         );
       })()}

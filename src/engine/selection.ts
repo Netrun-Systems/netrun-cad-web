@@ -126,6 +126,35 @@ export function findElementAt(
   return null;
 }
 
+/**
+ * Marquee selection — return all elements whose bounding box is fully
+ * contained within `rect`. Elements that merely intersect (cross the
+ * marquee boundary) are NOT included; this matches AutoCAD's "window"
+ * selection convention. Crossing-window selection (which DOES include
+ * intersecting elements) is left for a future enhancement.
+ */
+export function findElementsInRect(
+  elements: CADElement[],
+  rect: { x: number; y: number; width: number; height: number },
+): CADElement[] {
+  const r1x = rect.x;
+  const r1y = rect.y;
+  const r2x = rect.x + rect.width;
+  const r2y = rect.y + rect.height;
+  const matched: CADElement[] = [];
+  for (const el of elements) {
+    const bb = getBoundingBox(el);
+    const e1x = bb.x;
+    const e1y = bb.y;
+    const e2x = bb.x + bb.width;
+    const e2y = bb.y + bb.height;
+    if (e1x >= r1x && e1y >= r1y && e2x <= r2x && e2y <= r2y) {
+      matched.push(el);
+    }
+  }
+  return matched;
+}
+
 /** Move an element by a delta. Returns a new element (immutable). */
 export function moveElement(element: CADElement, dx: number, dy: number): CADElement {
   switch (element.type) {
