@@ -5,8 +5,18 @@
  * Projects 3D IFC coordinates to a 2D plan view (X, Y; Z ignored).
  */
 
-import * as WebIFC from 'web-ifc';
+// web-ifc is loaded on demand — the WASM blob is ~3MB and is only fetched
+// the first time a user imports an IFC file.
+import type * as WebIFCType from 'web-ifc';
 import type { CADElement, CADLine, CADCircle, Layer } from './types';
+
+let webIfcModulePromise: Promise<typeof WebIFCType> | null = null;
+function loadWebIfc(): Promise<typeof WebIFCType> {
+  if (!webIfcModulePromise) {
+    webIfcModulePromise = import('web-ifc');
+  }
+  return webIfcModulePromise;
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -29,18 +39,20 @@ const IFC_LAYER_MAP: Record<string, { layerId: string; name: string; color: stri
   IFCCOLUMN:            { layerId: 'ifc-column',   name: 'IFC Columns',         color: '#737373' },
 };
 
-/** Map web-ifc type constants to their string name for lookup */
-const IFC_TYPE_ENTRIES: Array<{ typeCode: number; typeName: string }> = [
-  { typeCode: WebIFC.IFCWALL,             typeName: 'IFCWALL' },
-  { typeCode: WebIFC.IFCWALLSTANDARDCASE, typeName: 'IFCWALLSTANDARDCASE' },
-  { typeCode: WebIFC.IFCDOOR,             typeName: 'IFCDOOR' },
-  { typeCode: WebIFC.IFCWINDOW,           typeName: 'IFCWINDOW' },
-  { typeCode: WebIFC.IFCFLOWSEGMENT,      typeName: 'IFCFLOWSEGMENT' },
-  { typeCode: WebIFC.IFCFLOWFITTING,       typeName: 'IFCFLOWFITTING' },
-  { typeCode: WebIFC.IFCFLOWTERMINAL,      typeName: 'IFCFLOWTERMINAL' },
-  { typeCode: WebIFC.IFCSLAB,             typeName: 'IFCSLAB' },
-  { typeCode: WebIFC.IFCCOLUMN,           typeName: 'IFCCOLUMN' },
-];
+/** Build the IFC type/name table from a loaded web-ifc module. */
+function buildTypeEntries(WebIFC: typeof WebIFCType): Array<{ typeCode: number; typeName: string }> {
+  return [
+    { typeCode: WebIFC.IFCWALL,             typeName: 'IFCWALL' },
+    { typeCode: WebIFC.IFCWALLSTANDARDCASE, typeName: 'IFCWALLSTANDARDCASE' },
+    { typeCode: WebIFC.IFCDOOR,             typeName: 'IFCDOOR' },
+    { typeCode: WebIFC.IFCWINDOW,           typeName: 'IFCWINDOW' },
+    { typeCode: WebIFC.IFCFLOWSEGMENT,      typeName: 'IFCFLOWSEGMENT' },
+    { typeCode: WebIFC.IFCFLOWFITTING,      typeName: 'IFCFLOWFITTING' },
+    { typeCode: WebIFC.IFCFLOWTERMINAL,     typeName: 'IFCFLOWTERMINAL' },
+    { typeCode: WebIFC.IFCSLAB,             typeName: 'IFCSLAB' },
+    { typeCode: WebIFC.IFCCOLUMN,           typeName: 'IFCCOLUMN' },
+  ];
+}
 
 // ── Element shape classification ─────────────────────────────────────────────
 
@@ -76,7 +88,7 @@ export interface IFCImportResult {
  * falling back to flat mesh centroid if that path is unavailable.
  */
 function extractPlacement(
-  ifcApi: WebIFC.IfcAPI,
+  ifcApi: WebIFCType.IfcAPI,
   modelID: number,
   expressID: number,
 ): { x: number; y: number } | null {
@@ -125,7 +137,7 @@ function extractPlacement(
  * are the X and Y translation components.
  */
 function extractPlacementFromMesh(
-  ifcApi: WebIFC.IfcAPI,
+  ifcApi: WebIFCType.IfcAPI,
   modelID: number,
   expressID: number,
 ): { x: number; y: number } | null {
@@ -156,7 +168,7 @@ function toPixels(metres: number): number {
 
 // ── Schema detection ─────────────────────────────────────────────────────────
 
-function detectSchema(ifcApi: WebIFC.IfcAPI, modelID: number): string {
+function detectSchema(WebIFC: typeof WebIFCType, ifcApi: WebIFCType.IfcAPI, modelID: number): string {
   try {
     // Try to read IFCPROJECT to get the schema version from the header
     const header = ifcApi.GetHeaderLine(modelID, WebIFC.FILE_SCHEMA);
@@ -173,7 +185,7 @@ function detectSchema(ifcApi: WebIFC.IfcAPI, modelID: number): string {
   return 'UNKNOWN';
 }
 
-function detectProjectName(ifcApi: WebIFC.IfcAPI, modelID: number): string {
+function detectProjectName(WebIFC: typeof WebIFCType, ifcApi: WebIFCType.IfcAPI, modelID: number): string {
   try {
     const projectIds = ifcApi.GetLineIDsWithType(modelID, WebIFC.IFCPROJECT);
     if (projectIds.size() > 0) {
@@ -190,6 +202,8 @@ function detectProjectName(ifcApi: WebIFC.IfcAPI, modelID: number): string {
 // ── Main import function ─────────────────────────────────────────────────────
 
 export async function importIFC(file: File): Promise<IFCImportResult> {
+  const WebIFC = await loadWebIfc();
+  const IFC_TYPE_ENTRIES = buildTypeEntries(WebIFC);
   const ifcApi = new WebIFC.IfcAPI();
 
   // Set WASM path relative to app base
@@ -202,8 +216,8 @@ export async function importIFC(file: File): Promise<IFCImportResult> {
   const modelID = ifcApi.OpenModel(buffer);
 
   // Detect metadata
-  const schema = detectSchema(ifcApi, modelID);
-  const projectName = detectProjectName(ifcApi, modelID);
+  const schema = detectSchema(WebIFC, ifcApi, modelID);
+  const projectName = detectProjectName(WebIFC, ifcApi, modelID);
 
   const elements: CADElement[] = [];
   const entityTypes: Record<string, number> = {};
@@ -229,7 +243,7 @@ export async function importIFC(file: File): Promise<IFCImportResult> {
     const layerDef = IFC_LAYER_MAP[typeName];
     if (!layerDef) continue;
 
-    let ids: WebIFC.Vector<number>;
+    let ids: WebIFCType.Vector<number>;
     try {
       ids = ifcApi.GetLineIDsWithType(modelID, typeCode, true);
     } catch {

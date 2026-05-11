@@ -4,9 +4,19 @@
  * Supports standard landscape plan scales and ARCH/Letter page sizes.
  */
 
-import { jsPDF } from 'jspdf';
+// jsPDF is loaded on demand — the library plus html2canvas it pulls in
+// is ~400KB and only paid when a user actually exports a PDF.
+import type { jsPDF } from 'jspdf';
 import type { CADElement, Layer, GridSettings } from './types';
 import { renderAll } from '../components/Canvas/renderer';
+
+let jsPdfPromise: Promise<typeof import('jspdf')> | null = null;
+function loadJsPdf(): Promise<typeof import('jspdf')> {
+  if (!jsPdfPromise) {
+    jsPdfPromise = import('jspdf');
+  }
+  return jsPdfPromise;
+}
 
 // ── Scale definitions ─────────────────────────────────────────────────────────
 
@@ -114,6 +124,7 @@ export async function exportToPDF(
   ctx.fillStyle = originalFill;
 
   // --- Create jsPDF document ---
+  const { jsPDF } = await loadJsPdf();
   const pdf = new jsPDF({
     orientation: pageSize.orientation,
     unit: 'in',

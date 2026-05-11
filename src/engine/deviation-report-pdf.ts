@@ -5,8 +5,19 @@
  * Uses jsPDF basic drawing methods (no autoTable plugin required).
  */
 
-import { jsPDF } from 'jspdf';
+// jsPDF is loaded on demand — see pdf-export.ts. Sharing the same lazy
+// loader through dynamic import means the chunk is fetched at most once
+// per session no matter which PDF function a user triggers first.
+import type { jsPDF } from 'jspdf';
 import type { DeviationEntry } from './deviation-renderer';
+
+let jsPdfPromise: Promise<typeof import('jspdf')> | null = null;
+function loadJsPdf(): Promise<typeof import('jspdf')> {
+  if (!jsPdfPromise) {
+    jsPdfPromise = import('jspdf');
+  }
+  return jsPdfPromise;
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -72,9 +83,10 @@ function deviationTypeLabel(type: string): string {
 
 // ─── PDF Generation ─────────────────────────────────────────────────────────
 
-export function generateDeviationPDF(options: DeviationPDFOptions): void {
+export async function generateDeviationPDF(options: DeviationPDFOptions): Promise<void> {
   const { projectName, date, scanInfo, blueprintInfo, deviations, summary, toleranceMm } = options;
 
+  const { jsPDF } = await loadJsPdf();
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
   // ── PAGE 1: Summary ─────────────────────────────────────────────────────

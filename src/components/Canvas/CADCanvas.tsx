@@ -78,7 +78,9 @@ import { ProjectFilesPanel } from '../ProjectManager/ProjectFilesPanel';
 import { RevisionHistoryPanel } from '../ProjectManager/RevisionHistoryPanel';
 import type { Detection3D } from '../Viewport3D/ModelViewer3D';
 import SplitView from '../SplitView/SplitView';
-import ModelViewer3D from '../Viewport3D/ModelViewer3D';
+// 3D viewer is lazy — three.js + @react-three are ~600KB and only paid
+// when an enclosing JSX renders <ModelViewer3D /> inside <Suspense>.
+const ModelViewer3D = React.lazy(() => import('../Viewport3D/ModelViewer3D'));
 import type { PointCloudData } from '../../engine/pointcloud-loader';
 import BlueprintPanel from '../BlueprintPanel/BlueprintPanel';
 import ProjectDashboard from '../Dashboard/ProjectDashboard';
