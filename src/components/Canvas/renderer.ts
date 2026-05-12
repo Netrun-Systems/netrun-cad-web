@@ -1,5 +1,6 @@
 import getStroke from 'perfect-freehand';
 import type {
+  Point,
   CADElement,
   CADLine,
   CADRectangle,
@@ -331,19 +332,47 @@ function renderDimension(ctx: CanvasRenderingContext2D, el: CADDimension, grid: 
     return;
   }
 
-  // Linear + aligned: chord-parallel dim line offset perpendicular.
-  // (In this renderer both styles look the same — chord-parallel placement.
-  // A future enhancement could project 'linear' to horizontal/vertical axes;
-  // for now the visual is consistent and the data still distinguishes the
-  // two styles for downstream export.)
+  // Linear vs aligned:
+  //   aligned — dim line PARALLEL to the chord, offset perpendicular.
+  //             Label shows the actual chord length.
+  //   linear  — dim line PROJECTED to the dominant axis (horizontal if
+  //             |dx| >= |dy|, else vertical). Extension lines run from
+  //             each endpoint perpendicular to the dim line. Label shows
+  //             the projected length (so a 10ft chord at 60° reads "5ft"
+  //             on the horizontal projection — matches AutoCAD DIMLINEAR).
+  const dx = el.p2.x - el.p1.x;
+  const dy = el.p2.y - el.p1.y;
   const dist = distance(el.p1, el.p2);
-  const ang = angle(el.p1, el.p2);
-  const perpAngle = ang + Math.PI / 2;
-  const ox = Math.cos(perpAngle) * el.offset;
-  const oy = Math.sin(perpAngle) * el.offset;
 
-  const dp1 = { x: el.p1.x + ox, y: el.p1.y + oy };
-  const dp2 = { x: el.p2.x + ox, y: el.p2.y + oy };
+  let dp1: Point;
+  let dp2: Point;
+  let labelDist: number;
+
+  if (style === 'linear') {
+    // Project to the dominant axis
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      // Horizontal projection — dim line runs at constant Y = max(p1.y, p2.y) + offset
+      const baseY = Math.max(el.p1.y, el.p2.y) + el.offset;
+      dp1 = { x: el.p1.x, y: baseY };
+      dp2 = { x: el.p2.x, y: baseY };
+      labelDist = Math.abs(dx);
+    } else {
+      // Vertical projection — dim line runs at constant X = max(p1.x, p2.x) + offset
+      const baseX = Math.max(el.p1.x, el.p2.x) + el.offset;
+      dp1 = { x: baseX, y: el.p1.y };
+      dp2 = { x: baseX, y: el.p2.y };
+      labelDist = Math.abs(dy);
+    }
+  } else {
+    // Aligned: chord-parallel offset (existing behavior)
+    const ang = Math.atan2(dy, dx);
+    const perpAngle = ang + Math.PI / 2;
+    const ox = Math.cos(perpAngle) * el.offset;
+    const oy = Math.sin(perpAngle) * el.offset;
+    dp1 = { x: el.p1.x + ox, y: el.p1.y + oy };
+    dp2 = { x: el.p2.x + ox, y: el.p2.y + oy };
+    labelDist = dist;
+  }
 
   ctx.setLineDash([4, 4]);
 
@@ -364,7 +393,7 @@ function renderDimension(ctx: CanvasRenderingContext2D, el: CADDimension, grid: 
 
   // Label
   const mid = midpoint(dp1, dp2);
-  const label = el.label || formatMeasurement(dist, grid);
+  const label = el.label || formatMeasurement(labelDist, grid);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
   ctx.fillText(label, mid.x, mid.y - 4);
