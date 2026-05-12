@@ -9,6 +9,8 @@ interface MultiPropertyPanelProps {
   /** Set a stroke/fill/text color uniformly across compatible elements. */
   onColorChange: (color: string) => void;
   onDeleteAll: () => void;
+  /** Triggered by the "Make Block" button. The parent opens MakeBlockDialog. */
+  onMakeBlock: () => void;
   onClose: () => void;
 }
 
@@ -43,6 +45,7 @@ export const MultiPropertyPanel: React.FC<MultiPropertyPanelProps> = ({
   onLayerChange,
   onColorChange,
   onDeleteAll,
+  onMakeBlock,
   onClose,
 }) => {
   const breakdown = elementTypeBreakdown(elements);
@@ -107,11 +110,16 @@ export const MultiPropertyPanel: React.FC<MultiPropertyPanelProps> = ({
         </div>
       </div>
 
-      {/* Footer — bulk delete */}
+      {/* Footer — bulk ops */}
       <div className="px-3 py-2 border-t border-cad-accent flex items-center gap-1">
-        <div className="flex-1 text-cad-dim text-[10px] italic">
-          Drag to move all, arrows to nudge
-        </div>
+        <button
+          onClick={onMakeBlock}
+          className="px-2 py-1 text-cad-text hover:bg-cad-accent/40 rounded text-xs transition-colors"
+          title="Save selection as a reusable block"
+        >
+          Make Block
+        </button>
+        <div className="flex-1" />
         <button
           onClick={onDeleteAll}
           className="px-2 py-1 text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded text-xs transition-colors"

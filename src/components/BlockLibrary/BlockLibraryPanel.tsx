@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BLOCK_CATALOG, type BlockDefinition } from '../../data/blocks';
+import { loadCustomBlocks, deleteCustomBlock, type CustomBlockDefinition } from '../../data/custom-blocks';
 
 interface BlockLibraryPanelProps {
   /** The currently armed block-to-place id (set when the user clicks one). */
@@ -109,17 +110,37 @@ export const BlockLibraryPanel: React.FC<BlockLibraryPanelProps> = ({
   onClose,
 }) => {
   const [filter, setFilter] = useState('');
+  const [custom, setCustom] = useState<CustomBlockDefinition[]>(() => loadCustomBlocks());
+
+  // Reload custom blocks when storage changes (the saver dispatches a
+  // custom event so we don't poll).
+  useEffect(() => {
+    const reload = () => setCustom(loadCustomBlocks());
+    window.addEventListener('netrun-cad-custom-blocks-changed', reload);
+    return () => window.removeEventListener('netrun-cad-custom-blocks-changed', reload);
+  }, []);
+
+  const handleDeleteCustom = (blockId: string, name: string) => {
+    if (!window.confirm(`Delete custom block "${name}"? Existing instances of this block in your drawings will render as a red X marker.`)) {
+      return;
+    }
+    deleteCustomBlock(blockId);
+  };
 
   const grouped = useMemo(() => {
-    const matched = BLOCK_CATALOG.filter(
+    const matchedBuiltin = BLOCK_CATALOG.filter(
+      (b) => !filter || b.name.toLowerCase().includes(filter.toLowerCase()) || b.id.includes(filter.toLowerCase()),
+    );
+    const matchedCustom = custom.filter(
       (b) => !filter || b.name.toLowerCase().includes(filter.toLowerCase()) || b.id.includes(filter.toLowerCase()),
     );
     const out: Record<BlockDefinition['category'], BlockDefinition[]> = {
       furniture: [], structural: [], hardscape: [], lighting: [],
     };
-    for (const b of matched) out[b.category].push(b);
-    return out;
-  }, [filter]);
+    for (const b of matchedBuiltin) out[b.category].push(b);
+    for (const b of matchedCustom) out[b.category].push(b);
+    return { byCategory: out, customMatches: matchedCustom };
+  }, [filter, custom]);
 
   return (
     <div className="absolute top-12 right-2 w-72 max-h-[80vh] flex flex-col bg-cad-surface/95 backdrop-blur-sm border border-cad-accent rounded-lg z-30 shadow-xl">
@@ -152,41 +173,59 @@ export const BlockLibraryPanel: React.FC<BlockLibraryPanelProps> = ({
         </div>
       )}
 
-      {/* Block grid by category */}
+      {/* Block grid by category — custom blocks marked with a delete affordance */}
       <div className="flex-1 overflow-y-auto px-2 py-2 space-y-3">
         {CATEGORY_ORDER.map((cat) => {
-          const items = grouped[cat];
+          const items = grouped.byCategory[cat];
           if (items.length === 0) return null;
+          const customCountInCat = items.filter((b) => 'custom' in b).length;
           return (
             <div key={cat}>
-              <div className="text-cad-dim text-[10px] uppercase tracking-wider px-1 pb-1">
-                {CATEGORY_LABEL[cat]}
+              <div className="text-cad-dim text-[10px] uppercase tracking-wider px-1 pb-1 flex justify-between">
+                <span>{CATEGORY_LABEL[cat]}</span>
+                {customCountInCat > 0 && (
+                  <span className="text-cad-highlight/80">{customCountInCat} custom</span>
+                )}
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {items.map((block) => {
                   const isPending = pendingBlockId === block.id;
+                  const isCustom = 'custom' in block;
                   return (
-                    <button
-                      key={block.id}
-                      onClick={() => onSelectBlock(isPending ? null : block.id)}
-                      title={`${block.name}${block.description ? ' — ' + block.description : ''}`}
-                      className={`flex flex-col items-center gap-1 p-1.5 rounded transition-colors ${
-                        isPending
-                          ? 'bg-cad-highlight/20 ring-2 ring-cad-highlight'
-                          : 'hover:bg-cad-accent/30'
-                      }`}
-                    >
-                      <BlockThumbnail block={block} />
-                      <span className="text-cad-text text-[10px] text-center leading-tight">
-                        {block.name}
-                      </span>
-                    </button>
+                    <div key={block.id} className="relative group">
+                      <button
+                        onClick={() => onSelectBlock(isPending ? null : block.id)}
+                        title={`${block.name}${block.description ? ' — ' + block.description : ''}${isCustom ? ' (custom)' : ''}`}
+                        className={`w-full flex flex-col items-center gap-1 p-1.5 rounded transition-colors ${
+                          isPending
+                            ? 'bg-cad-highlight/20 ring-2 ring-cad-highlight'
+                            : 'hover:bg-cad-accent/30'
+                        }`}
+                      >
+                        <BlockThumbnail block={block} />
+                        <span className={`text-[10px] text-center leading-tight ${isCustom ? 'text-cad-highlight' : 'text-cad-text'}`}>
+                          {block.name}
+                        </span>
+                      </button>
+                      {isCustom && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteCustom(block.id, block.name); }}
+                          title="Delete custom block"
+                          className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-900/90 text-red-200 text-xs leading-none opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-700"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
             </div>
           );
         })}
+        {grouped.customMatches.length === 0 && BLOCK_CATALOG.length === 0 && (
+          <div className="text-cad-dim text-xs italic px-1">No blocks match your filter.</div>
+        )}
       </div>
     </div>
   );

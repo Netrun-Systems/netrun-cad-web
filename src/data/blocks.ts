@@ -232,5 +232,18 @@ export const BLOCK_CATALOG: BlockDefinition[] = [
 
 /** Lookup helper used by render + schedule code. */
 export function getBlock(blockId: string): BlockDefinition | undefined {
-  return BLOCK_CATALOG.find((b) => b.id === blockId);
+  const builtIn = BLOCK_CATALOG.find((b) => b.id === blockId);
+  if (builtIn) return builtIn;
+  // Search custom blocks via the registered resolver (set by
+  // custom-blocks.ts at module load). Indirect through a registry to
+  // avoid a circular import: custom-blocks imports BlockDefinition
+  // from this module, so we can't statically import it back.
+  return customBlockResolver?.(blockId);
+}
+
+/** Custom-blocks module registers itself here on load so getBlock can
+ *  consult both catalogs without a circular import. */
+let customBlockResolver: ((blockId: string) => BlockDefinition | undefined) | null = null;
+export function registerCustomBlockResolver(resolver: (blockId: string) => BlockDefinition | undefined): void {
+  customBlockResolver = resolver;
 }

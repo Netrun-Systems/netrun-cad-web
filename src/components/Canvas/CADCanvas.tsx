@@ -94,6 +94,7 @@ import PropertyPanel from '../PropertyPanel/PropertyPanel';
 import MultiPropertyPanel from '../PropertyPanel/MultiPropertyPanel';
 import PlantSchedulePanel from '../PlantSchedule/PlantSchedulePanel';
 import BlockLibraryPanel from '../BlockLibrary/BlockLibraryPanel';
+import MakeBlockDialog from '../BlockLibrary/MakeBlockDialog';
 import { cacheProject } from '../../services/offline-storage';
 
 let plantPlaceId = 1;
@@ -169,6 +170,7 @@ export const CADCanvas: React.FC = () => {
   const [showPlantPanel, setShowPlantPanel] = useState(false);
   const [showPlantSchedule, setShowPlantSchedule] = useState(false);
   const [showBlockLibrary, setShowBlockLibrary] = useState(false);
+  const [showMakeBlockDialog, setShowMakeBlockDialog] = useState(false);
   /** When non-null, the next click on the canvas (in select mode) drops a
    *  block instance of this id. Cleared on placement or Esc. */
   const [pendingBlockId, setPendingBlockId] = useState<string | null>(null);
@@ -690,6 +692,10 @@ export const CADCanvas: React.FC = () => {
         case 'panel:plants':    setShowPlantPanel((s) => !s); break;
         case 'panel:plant-schedule': setShowPlantSchedule((s) => !s); break;
         case 'panel:blocks':    setShowBlockLibrary((s) => !s); break;
+        case 'block:make-from-selection':
+          if (selectedIds.size >= 2) setShowMakeBlockDialog(true);
+          else setCmdHistory((h) => [...h, 'mkblock: select 2 or more elements first']);
+          break;
         case 'basemap:toggle':  setBasemap((b) => ({ ...b, enabled: !b.enabled })); break;
         case 'file:scan':       /* handled by ImportExport */ break;
         case 'file:gis':        /* handled by ImportExport */ break;
@@ -2320,10 +2326,43 @@ export const CADCanvas: React.FC = () => {
               }
             })}
             onDeleteAll={doDelete}
+            onMakeBlock={() => setShowMakeBlockDialog(true)}
             onClose={() => setSelectedIds(new Set())}
           />
         );
       })()}
+
+      {/* Make-block dialog — opens from the MultiPropertyPanel "Make Block"
+          button. Saves the selected elements as a custom block in
+          localStorage and replaces the selection with a single CADBlockInstance
+          reference at the bbox center. */}
+      {showMakeBlockDialog && selectedIds.size >= 2 && (
+        <MakeBlockDialog
+          elements={elements.filter((e) => selectedIds.has(e.id))}
+          onClose={() => setShowMakeBlockDialog(false)}
+          onCreated={(blockId, insertionPoint) => {
+            // Replace the selected elements with one block instance at the
+            // bbox center. Done in a single setElements call so undo treats
+            // it as one step.
+            setElements((prev) => {
+              const remaining = prev.filter((el) => !selectedIds.has(el.id));
+              const inst: import('../../engine/types').CADBlockInstance = {
+                type: 'block',
+                id: `block-${Date.now()}`,
+                blockId,
+                position: insertionPoint,
+                rotation: 0,
+                scale: 1,
+                layerId: getActiveLayer(),
+              };
+              const next = [...remaining, inst];
+              setHistoryState((h) => pushState(h, next));
+              return next;
+            });
+            setSelectedIds(new Set());
+          }}
+        />
+      )}
 
       {/* Project Dashboard */}
       <ProjectDashboard
