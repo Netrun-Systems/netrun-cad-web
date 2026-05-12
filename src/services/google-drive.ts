@@ -923,6 +923,99 @@ class GoogleDriveService {
     const data = await response.json();
     return data.id as string;
   }
+
+  /* ------------------------------------------------------------------ */
+  /*  Custom blocks — cross-device sync                                  */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Push custom blocks to Drive. Stored as a single JSON file
+   * (`__custom-blocks.json`) at the root of the "Netrun CAD Projects"
+   * folder so it's accessible across all projects on this account.
+   * Uses the existing drive.file scope — no consent re-prompt needed.
+   *
+   * Returns the Drive fileId of the blocks document. Caller can ignore
+   * the id (we look it up by name on each operation).
+   */
+  async saveCustomBlocks(blocksJson: string): Promise<string> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+    const folderId = await this.ensureFolder();
+    const filename = '__custom-blocks.json';
+    const mimeType = 'application/json';
+
+    const searchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+        `name='${filename}' and '${folderId}' in parents and trashed=false`
+      )}&fields=files(id)&spaces=drive`,
+      { headers: { Authorization: `Bearer ${this.accessToken}` } },
+    );
+    const searchData = await searchRes.json();
+    const existingId = searchData.files?.[0]?.id;
+    const blob = new Blob([blocksJson], { type: mimeType });
+
+    if (existingId) {
+      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${this.accessToken}`, 'Content-Type': mimeType },
+        body: blob,
+      });
+      return existingId;
+    }
+
+    const boundary = 'cblocks_' + Date.now();
+    const metadata = JSON.stringify({ name: filename, mimeType, parents: [folderId] });
+    const body = new Blob([
+      [
+        `--${boundary}`,
+        'Content-Type: application/json; charset=UTF-8',
+        '', metadata,
+        `--${boundary}`,
+        `Content-Type: ${mimeType}`,
+        '', '',
+      ].join('\r\n'),
+      blob,
+      `\r\n--${boundary}--`,
+    ]);
+    const res = await fetch(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+          'Content-Type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+      },
+    );
+    const data = await res.json();
+    return data.id as string;
+  }
+
+  /**
+   * Fetch the custom-blocks JSON from Drive. Returns null if no document
+   * exists yet (first-time sign-in on a new device). Throws on other
+   * Drive errors so the caller can surface them.
+   */
+  async loadCustomBlocks(): Promise<string | null> {
+    if (!this.accessToken) throw new Error('Not signed in to Google Drive');
+    const folderId = await this.ensureFolder();
+    const filename = '__custom-blocks.json';
+    const searchRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+        `name='${filename}' and '${folderId}' in parents and trashed=false`
+      )}&fields=files(id)&spaces=drive`,
+      { headers: { Authorization: `Bearer ${this.accessToken}` } },
+    );
+    const searchData = await searchRes.json();
+    const fileId = searchData.files?.[0]?.id;
+    if (!fileId) return null;
+    const res = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      { headers: { Authorization: `Bearer ${this.accessToken}` } },
+    );
+    if (!res.ok) throw new Error(`Drive read failed: ${res.statusText}`);
+    return await res.text();
+  }
 }
 
 // Export a singleton

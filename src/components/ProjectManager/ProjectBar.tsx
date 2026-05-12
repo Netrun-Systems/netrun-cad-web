@@ -110,6 +110,12 @@ export const ProjectBar = forwardRef<ProjectBarHandle, ProjectBarProps>(({
     try {
       await googleDrive.signIn();
       setSignedIn(true);
+      // Cross-device custom-block sync — pull any blocks the user
+      // saved on another device. Fire-and-forget; merge is last-write-
+      // wins by createdAt, and a failure here doesn't block sign-in.
+      import('../../data/custom-blocks')
+        .then(({ pullCustomBlocksFromDrive }) => pullCustomBlocksFromDrive())
+        .catch(() => { /* sync is opportunistic */ });
     } catch (err) {
       console.error('Google Sign-in failed:', err);
     }
