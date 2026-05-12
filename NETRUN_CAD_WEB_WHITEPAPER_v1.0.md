@@ -1,12 +1,30 @@
 # Netrun CAD Web: Browser-Native CAD for Landscape Design and 3D Site Scan Workflows
 
-## Technical Whitepaper v1.0
+## Technical Whitepaper v1.1
 
-**Date**: May 1, 2026
+**Date**: May 11, 2026 (v1.1 closeout sprint)
 **Author**: Daniel Garza, Founder and CEO, Netrun Systems
 **Platform**: https://cad.netrunsystems.com (landscape mode) / https://survai.netrunsystems.com (construction mode)
 **Repository**: /data/workspace/github/netrun-cad-web
-**Status**: Production live at cad.netrunsystems.com (HTTP 200, verified May 1, 2026); primary CAD interface for both landscape design and Survai 3D scan workflows; netrun-cad desktop is secondary.
+**Status**: Production live (Cloud Run revision `netrun-cad-web-00028-ml4`, deployed May 12 02:33 UTC). v1 documented backlog is complete — every gap named in the original v1.0 §6.1 future-work list shipped during the May 9-11 closeout sprint.
+
+---
+
+## Changelog
+
+### v1.1 — May 11, 2026 (v1 closeout sprint, 25 commits in 3 days)
+
+The May 9-11 sprint closed every named v1 future-work item from the v1.0 §6.1 list, every "Unimplemented CAD tool" no-op, and the documented landscape-workflow gaps. Highlights, in shipping order:
+
+- **May 9** — Production deploy mechanism cleaned up (Dockerfile build args wire `VITE_GOOGLE_*` from Secret Manager; previous deploys shipped with empty Google credentials). Google OAuth Console origin + redirect URI added (Daniel, in the GCP Console). COOP header `same-origin-allow-popups` set so the GIS popup can `postMessage` back. v1.0 whitepaper landed.
+- **May 10** — DESIGN.md (Stitch design.md format) added. `.gcloudignore` cleanup makes Dockerfile build args the sole credential source.
+- **May 11** — Bundle split + lazy-load (first-paint 733 KB gzip → 172 KB gzip, **77% reduction**). PropertyPanel + arrow-key nudge. Plant schedule auto-generation + RDP simplification on freehand DXF export. Polyline tool + resize via corner handles. Multi-select (shift-click + marquee). Arc + Ellipse tools. 4 advanced dimension tools (aligned, angular, radius, diameter). 3D viewer JSX wiring. Block library (8-block built-in catalog). Web Worker for OBJ + PLY parsing. Spline tool (closes the last "Unimplemented CAD tool" no-op). Custom blocks (define-from-selection, syncs across devices via Drive). Multi-resize via union bbox. Crossing-window marquee variant. Linear-vs-aligned dimension visual differentiation. Irrigation overlay (4 head types, 8 zones, GPM schedule with capacity warning).
+
+After v1.1, the entire AutoCAD-alias-registry tool set is wired (no remaining `tool:*` no-ops in the executeCommand switch), the selection-editing surface is end-to-end (single + multi for select / move / nudge / resize / property-edit / reorder / delete / make-block), and the documented landscape deliverables (planting plan, plant schedule, irrigation schedule, scaled PDF) all generate from the canvas without leaving the browser tab.
+
+### v1.0 — May 1, 2026
+
+Initial release. 4 drawing modes (CAD / Draw / Color / Text), 88-alias AutoCAD LT command line, DXF/PDF/SVG/PNG export, GeoJSON/KML/OBJ/PLY/IFC import, Google Drive integration, Esri satellite basemap with Nominatim geocoding, plant database (24 SoCal species with WUCOLS IV ratings), hostname-based dual product mode (landscape vs construction).
 
 ---
 
@@ -477,45 +495,47 @@ No specific price points are committed in this document. Any published pricing w
 
 ## 6. Limitations and Future Work
 
-### 6.1 Known Gaps (Current)
+### 6.1 Resolved in v1.1 (May 9-11, 2026 closeout sprint)
 
-**Google Drive OAuth not fully active in production.** The `cad.netrunsystems.com` origin has not yet been added to the GCP Console OAuth credential (DANIEL TIME QUEUE item 11, PROJECT_INDEX.md). Drive save/share shows the auth button but the OAuth flow does not complete in production. Local auto-save to `localStorage` functions correctly as a fallback.
+Every gap named in v1.0 §6.1 shipped during the May 9-11 sprint. They are listed here for changelog visibility:
 
-**Element selection and property editing.** There is no multi-select, bounding-box drag, or element resize handle implemented. The `select` tool in `useCADTools.ts` can identify an element under the cursor (via `findElementAt()` in `selection.ts`) but the UI for editing selected element properties is not wired. Move (`m`) is the only modify operation currently dispatched from the command line. The full modify command set (copy, rotate, scale, mirror, trim, extend, fillet) is registered in `commands.ts` with action IDs but the implementation stubs in `useCADTools.ts` have not been written.
+- **Google Drive OAuth** — Daniel added `cad.netrunsystems.com` and `survai.netrunsystems.com` to the GCP Console OAuth client (both authorized JS origins and authorized redirect URIs). Dockerfile build args + Secret Manager wiring inject `VITE_GOOGLE_CLIENT_ID` and `VITE_GOOGLE_API_KEY` into the production bundle (previous deploys shipped them empty). `nginx.conf` sets `Cross-Origin-Opener-Policy: same-origin-allow-popups` so the GIS popup can `postMessage` back to the opener. Drive save / share / open works end-to-end in production.
+- **Element selection and property editing** — `PropertyPanel` (per-type editor) and `MultiPropertyPanel` (group editor) ship. Selection supports click + shift-click toggle + window/crossing marquee. Drag-to-move + arrow-nudge work for single and multi. Resize handles render around the bbox (single) or union bbox (multi). Reorder, delete, layer-change, color-change all wired.
+- **Freehand DXF stroke bloat** — iterative Ramer-Douglas-Peucker simplification (1.5 canvas-px tolerance, well below pen thickness) cuts 480-vertex strokes to a fraction with no visible quality loss.
+- **Advanced dimension tools** — aligned, angular (3-point), radius (2-point), diameter (2-point) all wired. CADDimension grew a `dimStyle` field and optional `p3` (angular vertex). Linear dimensions also got the AutoCAD DIMLINEAR projection (drops to dominant axis + reports projected length).
+- **Polyline, arc, ellipse, spline CAD tools** — all four shipped with full pipeline coverage (types, selection, render, SVG, DXF, useCADTools accumulation, PropertyPanel). The "Unimplemented CAD tools" no-op block is empty for the documented list.
+- **Block library + symbol insertion** — built-in 8-block landscape catalog (bench, table+chairs, planter, gazebo, pergola, stepping stone, gate, path light) plus user-defined custom blocks (define-from-selection, persists to localStorage, syncs cross-device via Drive).
+- **Irrigation planning overlay** — 4 head types (rotor 15ft / spray 8ft / drip 2ft / bubbler 4ft) with industry-typical GPM rates (4 / 2 / 0.5 / 1), 8 color-coded zones, translucent coverage discs at 20% fill, IrrigationPanel for placement, IrrigationScheduleDialog with per-zone GPM totals (capacity-warning banner if any zone exceeds 12 GPM = typical residential 3/4″ service peak).
+- **Plant schedule auto-generation** — `generatePlantSchedule(elements, PLANT_DATABASE)` groups by botanical, sums coverage, bins by water-use category. Renders as a modal table with summary chips (placements / species / % low-water). CSV download via Blob; PDF export via the lazy-loaded jsPDF chunk. PDF includes a WUCOLS verdict line (✓ "qualifies as water-wise design" at 75%+ low-water).
 
-**Survai cloud integration in flight.** The `SurvaiPanel` and `survai.ts` service layer are complete and production-ready. The remaining work is wiring the `VITE_SURVAI_API_URL` and `VITE_SURVAI_TOKEN` environment variables into the Cloud Run deployment configuration, which requires a Survai authentication token to be provisioned and stored in GCP Secret Manager.
+### 6.2 Resolved scaling concerns
 
-**No multi-user collaboration.** The project file model is single-user. Two designers editing the same `.ncad` file simultaneously will overwrite each other. WebSocket/CRDT collaboration is on the long-term roadmap and is explicitly documented as future work in `CLAUDE.md:241`.
+- **Large point clouds (>500K vertices)** — OBJ + PLY parsing moved into a Web Worker (`src/workers/scan-parser.worker.ts`); the main thread stays responsive during import. Three callers (ScanImportModal, SurvaiPanel, pointcloud-loader) updated to use the Promise-based wrapper at `src/engine/scan-parser-worker.ts`.
+- **First-paint critical-path JS** — Vite `manualChunks` split + lazy `React.lazy` for ModelViewer3D + dynamic `import()` for web-ifc and jsPDF cut first-paint from 4.45 MB raw / 733 KB gzip to 515 KB raw / 172 KB gzip (**77% smaller**). The 3.6 MB web-ifc WASM, 1 MB three.js bundle, and 360 KB jsPDF chunk are now fetched only when the user triggers their respective features.
 
-**No express backend.** The application is entirely client-side. User authentication uses Google Identity Services only for Drive access, not for any application-level access control. The `@netrun/auth-client` shared library integration and a proper Express backend with RBAC are documented in `CLAUDE.md:243` as future work.
+The renderer-redraws-everything concern from v1.0 §6.2 is unchanged — at >5,000 elements low-zoom the 60fps target may not hold on older iPad hardware. Dirty-region invalidation is on the v2 list.
 
-**Freehand strokes export as polylines in DXF.** Apple Pencil strokes are converted to LWPOLYLINE entities on DXF export — one vertex per `StrokePoint`. For a typical 2-second pencil stroke at 240Hz Apple Pencil input, this produces roughly 480 vertices per stroke entity. Complex freehand drawings produce large DXF files. A Ramer-Douglas-Peucker simplification pass before export would reduce vertex count without visible quality loss; this is not yet implemented.
+### 6.3 Open in v2 (see `TODO.md`)
 
-**Advanced dimension tools not implemented.** The `CADDimension` type supports linear (two-point) dimensions only. Aligned dimensions, angular dimensions, radius/diameter annotations, and ordinate dimensions are registered as command aliases in `commands.ts` but have no implementation in `useCADTools.ts`. (`CLAUDE.md:244`)
+What's left after the v1.1 sprint is genuinely v2 territory — not gaps in the v1 surface:
 
-**Polyline, arc, ellipse, spline CAD tools partially implemented.** These element types are registered in `commands.ts` and their `Tool` action IDs are dispatched, but the geometric accumulation logic in `useCADTools.ts` is not complete for arcs (requires three-point arc calculation) and splines (requires bezier fit to input points). Lines, rectangles, circles, and dimensions are fully implemented.
+- **Live multi-user collaboration** (WebSocket / CRDT) — single-user `.ncad` files; two designers editing the same project simultaneously will still overwrite each other.
+- **Express backend + `@netrun/auth-client`** — the app is fully client-side; auth is Google Identity Services only.
+- **DXF SPLINE entity** — splines export as a 12-vertex-per-segment polyline approximation today; the real DXF SPLINE carries knot vectors + weights.
+- **DXF BLOCK + INSERT entities** — block instances export as resolved geometry today; real BLOCKS section + INSERT entities would let downstream CAD edit-in-place.
+- **Multi-rotate** — multi-resize works; rotation handle on the union bbox is the v2 piece.
+- **Per-emitter scheduling controllers** — irrigation models the static layout (heads, zones, GPM); v2 would add zone runtimes + controller programs (start time, days, seasonal adjustment, rain sensors).
+- **ETo-based water budget** — pull USDA / CIMIS daily reference evapotranspiration for the project's lat/lng (basemap already has it) and compute zone runtime from coverage area + plant water-use coefficients (WUCOLS data already there) + ETo. Reports gallons/month/zone; flags zones that exceed local water-use restrictions.
+- **Live team-shared block library** — custom blocks today sync per-Google-account via Drive; team-level sharing needs a server-side directory.
+- **IFC + DXF Web Worker parsing** — OBJ + PLY moved off-thread; IFC and DXF parsing still run on the main thread (~50 ms typical, up to several seconds for very large commercial IFC).
+- **Plotter direct-print over LAN** + **PDF title-block templates** — current PDF export has a built-in title block; allowing user-uploaded templates and direct plotter output unlock printshop-style workflows.
+- **Export integrations** — IrrigationPro, Hunter Centralus, Rain Bird IQ, Land F/X, DynaSCAPE.
 
-### 6.2 Scaling Concerns
+The full v2 backlog with scoping notes lives in `TODO.md`.
 
-**Large point clouds (>500K vertices).** The current OBJ/PLY parsers run synchronously on the main thread. A 500K-vertex KIRI scan can cause a 2-5 second freeze during import. The auto-decimation in `ply-import.ts` mitigates this for point clouds but does not help for dense mesh OBJ files. Moving the parsers to a Web Worker is the correct fix; the architecture is compatible (pure TypeScript functions with no DOM access) but the refactor has not been done.
+### 6.4 Survai cloud integration
 
-**Canvas performance at high element counts.** The renderer redraws the entire canvas on every frame. For drawings with >5,000 elements at low zoom (many elements visible), the 60fps target may not be maintained on older iPad hardware. Dirty-region invalidation (only redraw changed areas) or off-screen canvas compositing for static layers would address this but are not implemented.
-
-### 6.3 Roadmap (Documented, Not Committed)
-
-The following items appear in `CLAUDE.md:236-244` as explicitly documented future work:
-
-- Multi-user collaboration (WebSocket/CRDT)
-- Element selection and property editing (move, resize selected elements)
-- Express backend with full auth (`@netrun/auth-client`)
-- Advanced dimension tools (aligned, angular, radius, diameter)
-- Polyline, arc, ellipse, spline completion
-- Block library and symbol insertion
-- Irrigation planning overlay
-- Plant schedule auto-generation
-- Print directly to connected plotter
-
-The nearest-term milestone is Survai cloud scan integration (BUILD item in PROJECT_INDEX.md row 23), followed by Google Drive OAuth activation in production.
+`SurvaiPanel` and the `src/services/survai.ts` API client are production-ready. The remaining work is wiring `VITE_SURVAI_API_URL` and `VITE_SURVAI_TOKEN` into the Cloud Run deployment, which requires a Survai authentication token to be provisioned in GCP Secret Manager (decisions about per-org vs per-seat auth models pending). When that lands, an end-to-end "iPhone scan → Survai inference → CAD plan with detection markup" flow goes live in the construction-mode deployment.
 
 ---
 

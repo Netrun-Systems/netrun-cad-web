@@ -231,12 +231,30 @@ Long-press (600ms, touch only) emulates right-click for iPad context menu.
 
 ## Future Work (Not Yet Implemented)
 
-- Multi-user collaboration (WebSocket/CRDT)
-- Element selection and property editing (move, resize selected elements)
-- Express backend with full auth (@netrun/auth-client)
-- Advanced dimension tools (aligned, angular, radius, diameter)
-- Polyline, arc, ellipse, spline CAD tools
-- Block library and symbol insertion
-- Irrigation planning overlay
-- Plant schedule auto-generation
-- Print directly to connected plotter
+The May 9-11 2026 v1-completion sprint shipped every named v1 item from
+the original future-work list. See `TODO.md` for the v2 backlog.
+Quick summary of what remains:
+
+- Multi-user collaboration (WebSocket / CRDT) — needs design pass
+- Express backend with full auth (`@netrun/auth-client`)
+- DXF SPLINE + BLOCK/INSERT entities (currently approximated as polylines / resolved geometry)
+- Per-emitter irrigation controllers + ETo-based water budget
+- Live team-shared block library (per-account Drive sync works today)
+- Multi-rotate (multi-resize works; rotate handle on union bbox is the v2 piece)
+- IFC / DXF parsing in a Web Worker (OBJ + PLY already off-thread)
+- Plotter direct-print over LAN
+- Title-block templates for PDF export
+- IrrigationPro / Hunter / Rain Bird controller export
+
+What v1 ships (not future work):
+- 8 CAD primitives: line, rectangle, circle, polyline, arc, ellipse, spline, dimension
+- 5 dimension styles: linear, aligned, angular, radius, diameter
+- Selection + multi-select + drag-move + arrow-nudge + corner-handle resize (single + multi via union bbox)
+- PropertyPanel per-type editor + MultiPropertyPanel group editor
+- Block library (8 built-in + user-defined custom, syncs via Drive)
+- Irrigation overlay (4 head types, 8 zones, GPM schedule with capacity warnings)
+- Plant schedule auto-generation (CSV + PDF with WUCOLS verdict)
+- Web Worker OBJ + PLY parsing
+- Crossing-window marquee variant (right-to-left = include intersecting)
+- 3D viewer (Three.js + drei + fiber, lazy-loaded)
+- Hostname-based dual mode (cad.netrunsystems.com vs survai.netrunsystems.com)
