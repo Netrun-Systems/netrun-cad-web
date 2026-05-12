@@ -190,6 +190,27 @@ export function findElementAt(
 }
 
 /**
+ * Union bounding box of multiple elements. Returns null if `elements`
+ * is empty. Used by the multi-resize affordance — when 2+ elements are
+ * selected, we draw resize handles around this box and scale every
+ * element together about the opposite corner.
+ */
+export function unionBoundingBox(
+  elements: CADElement[],
+): { x: number; y: number; width: number; height: number } | null {
+  if (elements.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const el of elements) {
+    const bb = getBoundingBox(el);
+    if (bb.x < minX) minX = bb.x;
+    if (bb.y < minY) minY = bb.y;
+    if (bb.x + bb.width > maxX) maxX = bb.x + bb.width;
+    if (bb.y + bb.height > maxY) maxY = bb.y + bb.height;
+  }
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
  * Marquee selection — return all elements whose bounding box is fully
  * contained within `rect`. Elements that merely intersect (cross the
  * marquee boundary) are NOT included; this matches AutoCAD's "window"

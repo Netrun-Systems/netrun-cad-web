@@ -50,7 +50,7 @@ import { CommandLine } from '../CommandLine/CommandLine';
 import { ContextMenu, type ContextMenuEntry } from '../ContextMenu/ContextMenu';
 import { StatusBar } from '../StatusBar/StatusBar';
 import { findCommand, getShortAlias } from '../../engine/commands';
-import { findElementAt, moveElement, getBoundingBox, hitHandle, anchorForHandle, scaleElement, cursorForHandle, findElementsInRect, type ResizeHandle } from '../../engine/selection';
+import { findElementAt, moveElement, getBoundingBox, hitHandle, anchorForHandle, scaleElement, cursorForHandle, findElementsInRect, unionBoundingBox, type ResizeHandle } from '../../engine/selection';
 import { HelpPanel } from '../HelpPanel/HelpPanel';
 import { InteriorPanel } from '../InteriorPanel/InteriorPanel';
 import type { PlacingSymbol } from '../InteriorPanel/InteriorPanel';
@@ -220,13 +220,15 @@ export const CADCanvas: React.FC = () => {
   // Resize-by-handle state. Set on pointerdown if the user grabs one of
   // the four corner handles drawn around the selected element. Cleared
   // on pointerup. While set, pointermove computes new sx/sy relative to
-  // `anchor` and `dx0/dy0` and applies scaleElement to `startElement`.
+  // `anchor` and `dx0/dy0` and applies scaleElement to each entry in
+  // `startElements` (length 1 for single-selection resize, N for the
+  // multi-selection union-bbox resize).
   const resizeRef = useRef<{
     handle: ResizeHandle;
     anchor: Point;
     dx0: number;
     dy0: number;
-    startElement: import('../../engine/types').CADElement;
+    startElements: import('../../engine/types').CADElement[];
   } | null>(null);
 
   // Live cursor hint for hovering over a resize handle (without dragging).
@@ -915,10 +917,14 @@ export const CADCanvas: React.FC = () => {
           // 1. Resize handle hit-test takes priority over element hit-test.
           //    Without this, grabbing a corner handle would re-select the
           //    underlying element and start a drag-to-move instead.
-          if (selectedElementId) {
-            const sel = elements.find((e) => e.id === selectedElementId);
-            if (sel) {
-              const bb = getBoundingBox(sel);
+          //    Single-select: handles around the selected element's bbox.
+          //    Multi-select:  handles around the UNION bbox.
+          if (selectedIds.size > 0) {
+            const selEls = elements.filter((e) => selectedIds.has(e.id));
+            const bb = selEls.length === 1
+              ? getBoundingBox(selEls[0])
+              : unionBoundingBox(selEls);
+            if (bb) {
               const handle = hitHandle(bb, point, view.zoom);
               if (handle) {
                 const anchor = anchorForHandle(bb, handle);
@@ -930,7 +936,7 @@ export const CADCanvas: React.FC = () => {
                   // Floor magnitudes to avoid div-by-zero on the unused axis
                   dx0: Math.abs(dx0) < 1 ? Math.sign(dx0 || 1) : dx0,
                   dy0: Math.abs(dy0) < 1 ? Math.sign(dy0 || 1) : dy0,
-                  startElement: sel,
+                  startElements: selEls,
                 };
                 return;
               }
@@ -1031,23 +1037,31 @@ export const CADCanvas: React.FC = () => {
       }
 
       // ── Resize-by-handle takes priority over drag-to-move ──
-      if (resizeRef.current && selectedElementId) {
-        const { anchor, dx0, dy0, startElement } = resizeRef.current;
+      // Works for both single-element and multi-element resize: every
+      // snapshot in startElements gets scaled from its original state
+      // around the same anchor (the opposite corner of the union bbox).
+      if (resizeRef.current && resizeRef.current.startElements.length > 0) {
+        const { anchor, dx0, dy0, startElements } = resizeRef.current;
         const sx = (point.x - anchor.x) / dx0;
         const sy = (point.y - anchor.y) / dy0;
+        const startById = new Map(startElements.map((el) => [el.id, el]));
         setElements((prev) =>
-          prev.map((el) =>
-            el.id === selectedElementId ? scaleElement(startElement, anchor, sx, sy) : el,
-          ),
+          prev.map((el) => {
+            const start = startById.get(el.id);
+            return start ? scaleElement(start, anchor, sx, sy) : el;
+          }),
         );
         return;
       }
 
-      // Cursor hint while hovering a handle (no drag in progress)
-      if (mode === 'cad' && cadTool === 'select' && selectedElementId && !dragStartRef.current) {
-        const sel = elements.find((e) => e.id === selectedElementId);
-        if (sel) {
-          const bb = getBoundingBox(sel);
+      // Cursor hint while hovering a handle (no drag in progress).
+      // Union bbox for multi-select; single-element bbox otherwise.
+      if (mode === 'cad' && cadTool === 'select' && selectedIds.size > 0 && !dragStartRef.current) {
+        const selEls = elements.filter((e) => selectedIds.has(e.id));
+        const bb = selEls.length === 1
+          ? getBoundingBox(selEls[0])
+          : unionBoundingBox(selEls);
+        if (bb) {
           const handle = hitHandle(bb, point, view.zoom);
           if (handle !== hoverHandle) setHoverHandle(handle);
         }
@@ -1755,6 +1769,27 @@ export const CADCanvas: React.FC = () => {
             ctx.strokeRect(bb.x - pad, bb.y - pad, bb.width + pad * 2, bb.height + pad * 2);
           }
           ctx.setLineDash([]);
+        }
+
+        // Multi-select union-bbox handles: when 2+ are selected, draw a
+        // single set of handles around the union bbox so the user can
+        // resize the whole group together.
+        if (selectedIds.size >= 2) {
+          const selEls = elements.filter((e) => selectedIds.has(e.id));
+          const bb = unionBoundingBox(selEls);
+          if (bb) {
+            const pad = 4 / view.zoom;
+            const hs = 4 / view.zoom;
+            ctx.fillStyle = '#3b82f6';
+            for (const [hx, hy] of [
+              [bb.x - pad, bb.y - pad],
+              [bb.x + bb.width + pad, bb.y - pad],
+              [bb.x - pad, bb.y + bb.height + pad],
+              [bb.x + bb.width + pad, bb.y + bb.height + pad],
+            ]) {
+              ctx.fillRect(hx - hs, hy - hs, hs * 2, hs * 2);
+            }
+          }
         }
 
         if (selectedElementId) {
