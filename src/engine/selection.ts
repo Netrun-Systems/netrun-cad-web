@@ -211,15 +211,20 @@ export function unionBoundingBox(
 }
 
 /**
- * Marquee selection — return all elements whose bounding box is fully
- * contained within `rect`. Elements that merely intersect (cross the
- * marquee boundary) are NOT included; this matches AutoCAD's "window"
- * selection convention. Crossing-window selection (which DOES include
- * intersecting elements) is left for a future enhancement.
+ * Marquee selection. AutoCAD-style:
+ *   crossing=false (default, "window") — only fully-enclosed elements.
+ *   crossing=true                       — also includes elements whose
+ *                                          bbox intersects the marquee.
+ *
+ * AutoCAD distinguishes the two by drag direction: left-to-right drag
+ * is window selection (the safer default); right-to-left drag is crossing
+ * selection (catches everything the box touches). CADCanvas reads the
+ * drag direction at pointer-up time and passes the right flag.
  */
 export function findElementsInRect(
   elements: CADElement[],
   rect: { x: number; y: number; width: number; height: number },
+  crossing = false,
 ): CADElement[] {
   const r1x = rect.x;
   const r1y = rect.y;
@@ -232,8 +237,16 @@ export function findElementsInRect(
     const e1y = bb.y;
     const e2x = bb.x + bb.width;
     const e2y = bb.y + bb.height;
-    if (e1x >= r1x && e1y >= r1y && e2x <= r2x && e2y <= r2y) {
+    if (crossing) {
+      // Intersection test — true unless the bboxes are entirely separated
+      // along either axis.
+      if (e2x < r1x || e1x > r2x || e2y < r1y || e1y > r2y) continue;
       matched.push(el);
+    } else {
+      // Fully-enclosed (window) test
+      if (e1x >= r1x && e1y >= r1y && e2x <= r2x && e2y <= r2y) {
+        matched.push(el);
+      }
     }
   }
   return matched;

@@ -1106,10 +1106,12 @@ export const CADCanvas: React.FC = () => {
   );
 
   const onStrokeEnd = useCallback((point?: StrokePoint) => {
-    // Commit a marquee selection — find every element fully enclosed and
-    // either replace the selection (no shift) or add to it (shift held).
+    // Commit a marquee selection. AutoCAD convention: drag left-to-right
+    // is window selection (only fully-enclosed); right-to-left is crossing
+    // (also catches intersecting elements). Detected from start vs current.
     if (marqueeRef.current) {
       const m = marqueeRef.current;
+      const crossing = m.current.x < m.start.x;
       const rect = {
         x: Math.min(m.start.x, m.current.x),
         y: Math.min(m.start.y, m.current.y),
@@ -1119,7 +1121,7 @@ export const CADCanvas: React.FC = () => {
       // Tiny marquee (< 4 canvas px in either axis) is treated as a click
       // on empty canvas — just clear the marquee state, leave selection alone.
       if (rect.width >= 4 && rect.height >= 4) {
-        const matched = findElementsInRect(elements, rect);
+        const matched = findElementsInRect(elements, rect, crossing);
         const matchedIds = matched.map((e) => e.id);
         if (m.additive) {
           setSelectedIds((prev) => {
@@ -1841,16 +1843,24 @@ export const CADCanvas: React.FC = () => {
           }
         }
 
-        // Marquee selection preview (semi-transparent blue rect with dashed border)
+        // Marquee selection preview. Window mode (left-to-right): blue
+        // solid border. Crossing mode (right-to-left): green dashed border
+        // — AutoCAD's visual signal that you'll catch intersecting elements.
         if (marqueeRef.current) {
           const m = marqueeRef.current;
+          const crossing = m.current.x < m.start.x;
           const x = Math.min(m.start.x, m.current.x);
           const y = Math.min(m.start.y, m.current.y);
           const w = Math.abs(m.current.x - m.start.x);
           const h = Math.abs(m.current.y - m.start.y);
-          ctx.fillStyle = 'rgba(59, 130, 246, 0.10)';
+          if (crossing) {
+            ctx.fillStyle = 'rgba(34, 197, 94, 0.12)';
+            ctx.strokeStyle = '#22c55e';
+          } else {
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.10)';
+            ctx.strokeStyle = '#3b82f6';
+          }
           ctx.fillRect(x, y, w, h);
-          ctx.strokeStyle = '#3b82f6';
           ctx.lineWidth = 1 / view.zoom;
           ctx.setLineDash([4 / view.zoom, 3 / view.zoom]);
           ctx.strokeRect(x, y, w, h);
