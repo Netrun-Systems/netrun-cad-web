@@ -7,6 +7,7 @@
 
 import type { CADElement, Point } from './types';
 import { getBlock } from '../data/blocks';
+import { sampleSpline } from './spline';
 
 const HIT_TOLERANCE = 8; // pixels
 
@@ -104,6 +105,16 @@ export function hitTest(element: CADElement, point: Point, zoom: number): boolea
       // Closing edge if marked closed
       if (element.closed && pts.length >= 3) {
         if (distToSegment(point, pts[pts.length - 1], pts[0]) < tol) return true;
+      }
+      return false;
+    }
+
+    case 'spline': {
+      // Sample the curve cheaply (8 per segment is enough for hit-test)
+      // and treat as a polyline for the distance check.
+      const pts = sampleSpline(element.controlPoints, !!element.closed, element.tension, 8);
+      for (let i = 1; i < pts.length; i++) {
+        if (distToSegment(point, pts[i - 1], pts[i]) < tol) return true;
       }
       return false;
     }
@@ -234,6 +245,8 @@ export function moveElement(element: CADElement, dx: number, dy: number): CADEle
       return { ...element, points: element.points.map(p => ({ ...p, x: p.x + dx, y: p.y + dy })) };
     case 'polyline':
       return { ...element, points: element.points.map(p => ({ x: p.x + dx, y: p.y + dy })) };
+    case 'spline':
+      return { ...element, controlPoints: element.controlPoints.map(p => ({ x: p.x + dx, y: p.y + dy })) };
     default:
       return element;
   }
@@ -318,6 +331,8 @@ export function scaleElement(
       return { ...element, points: element.points.map((p) => ({ ...p, ...scalePoint(p, anchor, sx, sy) })) };
     case 'polyline':
       return { ...element, points: element.points.map((p) => scalePoint(p, anchor, sx, sy)) };
+    case 'spline':
+      return { ...element, controlPoints: element.controlPoints.map((p) => scalePoint(p, anchor, sx, sy)) };
     case 'text': {
       const newPos = scalePoint(element.position, anchor, sx, sy);
       const newSize = Math.max(6, element.fontSize * avg);
@@ -471,6 +486,16 @@ export function getBoundingBox(element: CADElement): { x: number; y: number; wid
     case 'polyline': {
       const xs = element.points.map(p => p.x);
       const ys = element.points.map(p => p.y);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };
+    }
+    case 'spline': {
+      // Bounding box of the sampled curve, not just the control points
+      // — Catmull-Rom can overshoot control points slightly.
+      const pts = sampleSpline(element.controlPoints, !!element.closed, element.tension, 12);
+      const xs = pts.map(p => p.x);
+      const ys = pts.map(p => p.y);
       const minX = Math.min(...xs);
       const minY = Math.min(...ys);
       return { x: minX, y: minY, width: Math.max(...xs) - minX, height: Math.max(...ys) - minY };

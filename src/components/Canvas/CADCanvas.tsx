@@ -529,9 +529,9 @@ export const CADCanvas: React.FC = () => {
         case 'tool:polyline':    setMode('cad'); setCadTool('polyline'); setLastDrawTool('polyline'); break;
         case 'tool:arc':         setMode('cad'); setCadTool('arc');      setLastDrawTool('arc');      break;
         case 'tool:ellipse':     setMode('cad'); setCadTool('ellipse');  setLastDrawTool('ellipse');  break;
+        case 'tool:spline':      setMode('cad'); setCadTool('spline');   setLastDrawTool('spline');   break;
 
         // Unimplemented CAD tools — acknowledge but no-op until implemented
-        case 'tool:spline':
         case 'tool:xline':
         case 'tool:ray':
         case 'tool:polygon':
@@ -790,7 +790,7 @@ export const CADCanvas: React.FC = () => {
   );
 
   // ── CAD tools ──────────────────────────────────────────────────────────────
-  const { handleCADDown, handleCADMove, handleCADUp, pendingInput, handleNumericInput, cancelPending, commitPolyline } = useCADTools({
+  const { handleCADDown, handleCADMove, handleCADUp, pendingInput, handleNumericInput, cancelPending, commitPolyline, commitSpline } = useCADTools({
     activeTool: cadTool,
     activeLayerId: getActiveLayer(),
     grid,
@@ -1405,6 +1405,11 @@ export const CADCanvas: React.FC = () => {
           commitPolyline();
           return;
         }
+        // Spline tool: Enter finishes the in-progress spline
+        if (mode === 'cad' && cadTool === 'spline' && pendingInput?.tool === 'spline') {
+          commitSpline();
+          return;
+        }
         // Repeat last command on Enter if nothing typed
         if (lastAction) {
           executeCommand(lastAction);
@@ -1559,7 +1564,7 @@ export const CADCanvas: React.FC = () => {
 
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool, selectedElementId, nudgeSelected, cadTool, commitPolyline, pendingBlockId]);
+  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool, selectedElementId, nudgeSelected, cadTool, commitPolyline, commitSpline, pendingBlockId]);
 
   // ── Compute canvas dimensions based on layout ────────────────────────────
   const sidePanelWidth = sidePanelCollapsed

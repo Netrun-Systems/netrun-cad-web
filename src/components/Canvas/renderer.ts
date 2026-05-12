@@ -22,6 +22,7 @@ import type {
 import { distance, formatMeasurement, midpoint, angle } from '../../engine/geometry';
 import { PLANT_DATABASE } from '../../data/plants';
 import { getBlock } from '../../data/blocks';
+import { splineToBezierSegments } from '../../engine/spline';
 import { INTERIOR_SYMBOLS } from '../../data/interior-symbols';
 import { renderInteriorSymbol } from '../../engine/interior-renderer';
 import { drawIconCanvas } from '../../engine/diagram-icons';
@@ -430,6 +431,24 @@ function renderPolyline(ctx: CanvasRenderingContext2D, el: CADPolyline) {
     ctx.lineTo(el.points[i].x, el.points[i].y);
   }
   if (el.closed && el.points.length >= 3) ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function renderSpline(ctx: CanvasRenderingContext2D, el: import('../../engine/types').CADSpline) {
+  if (el.controlPoints.length < 2) return;
+  const segments = splineToBezierSegments(el.controlPoints, !!el.closed, el.tension);
+  if (segments.length === 0) return;
+  ctx.save();
+  ctx.strokeStyle = el.strokeColor;
+  ctx.lineWidth = el.strokeWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(segments[0][0].x, segments[0][0].y);
+  for (const [, b1, b2, b3] of segments) {
+    ctx.bezierCurveTo(b1.x, b1.y, b2.x, b2.y, b3.x, b3.y);
+  }
   ctx.stroke();
   ctx.restore();
 }
@@ -878,6 +897,9 @@ export function renderAll(
         break;
       case 'polyline':
         renderPolyline(ctx, el);
+        break;
+      case 'spline':
+        renderSpline(ctx, el);
         break;
       case 'text':
         renderText(ctx, el);

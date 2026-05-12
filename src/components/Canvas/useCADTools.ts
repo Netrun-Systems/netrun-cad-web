@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import type { CADTool, CADElement, CADLine, CADRectangle, CADCircle, CADDimension, CADPolyline, CADArc, CADEllipse, Point, GridSettings } from '../../engine/types';
+import type { CADTool, CADElement, CADLine, CADRectangle, CADCircle, CADDimension, CADPolyline, CADSpline, CADArc, CADEllipse, Point, GridSettings } from '../../engine/types';
 import { snapToGrid, distance, angle } from '../../engine/geometry';
 
 let nextId = 1;
@@ -104,6 +104,9 @@ export function useCADTools({
   // the user presses Enter/Esc. Lives in a ref so that mid-stream clicks
   // append without React state thrashing.
   const polylinePointsRef = useRef<Point[]>([]);
+
+  // Spline tool — same multi-click accumulation as polyline.
+  const splinePointsRef = useRef<Point[]>([]);
 
   // Arc tool — 3-click flow: start, end, hint-point-on-arc.
   const arcPhaseRef = useRef(0);
@@ -431,6 +434,24 @@ export function useCADTools({
         return;
       }
 
+      // ─── Spline: same multi-click accumulation as polyline. Curve passes
+      //     through every clicked control point (Catmull-Rom).
+      if (activeTool === 'spline') {
+        splinePointsRef.current.push(point);
+        const count = splinePointsRef.current.length;
+        setPendingInput({
+          tool: 'spline',
+          startPoint: splinePointsRef.current[0],
+          mousePoint: point,
+          phase: count,
+          prompt:
+            count === 1
+              ? 'Specify next control point or press Enter to finish:'
+              : `Spline: ${count} control points — Enter to finish, Esc to cancel`,
+        });
+        return;
+      }
+
       // ─── Standard tools (line, rectangle, circle, ellipse): click-based flow ────
       if (activeTool === 'line' || activeTool === 'rectangle' || activeTool === 'circle' || activeTool === 'ellipse') {
         if (!startPointRef.current) {
@@ -634,6 +655,22 @@ export function useCADTools({
           type: 'polyline',
           id: '__preview__',
           points: livePoints,
+          layerId: activeLayerId,
+          strokeColor,
+          strokeWidth,
+        };
+        onPreviewChange(preview);
+        setPendingInput((prev) => (prev ? { ...prev, mousePoint: point } : null));
+        return;
+      }
+
+      // ─── Spline preview: live curve through control points + cursor ──
+      if (activeTool === 'spline' && splinePointsRef.current.length > 0) {
+        const livePoints = [...splinePointsRef.current, point];
+        const preview: CADSpline = {
+          type: 'spline',
+          id: '__preview__',
+          controlPoints: livePoints,
           layerId: activeLayerId,
           strokeColor,
           strokeWidth,
@@ -853,6 +890,7 @@ export function useCADTools({
     dimP1Ref.current = null;
     dimP2Ref.current = null;
     polylinePointsRef.current = [];
+    splinePointsRef.current = [];
     arcPhaseRef.current = 0;
     arcStartRef.current = null;
     arcEndRef.current = null;
@@ -888,6 +926,28 @@ export function useCADTools({
     onPreviewChange(null);
   }, [activeLayerId, strokeColor, strokeWidth, onElementCreated, onPreviewChange]);
 
+  /** Commit the in-progress spline. Same finish-gesture contract as polyline. */
+  const commitSpline = useCallback(() => {
+    if (splinePointsRef.current.length < 2) {
+      splinePointsRef.current = [];
+      setPendingInput(null);
+      onPreviewChange(null);
+      return;
+    }
+    const el: CADSpline = {
+      type: 'spline',
+      id: genId('spline'),
+      controlPoints: splinePointsRef.current.slice(),
+      layerId: activeLayerId,
+      strokeColor,
+      strokeWidth,
+    };
+    onElementCreated(el);
+    splinePointsRef.current = [];
+    setPendingInput(null);
+    onPreviewChange(null);
+  }, [activeLayerId, strokeColor, strokeWidth, onElementCreated, onPreviewChange]);
+
   return {
     handleCADDown,
     handleCADMove,
@@ -897,5 +957,6 @@ export function useCADTools({
     handleNumericInput,
     cancelPending,
     commitPolyline,
+    commitSpline,
   };
 }

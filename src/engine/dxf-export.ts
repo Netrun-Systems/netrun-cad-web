@@ -6,6 +6,7 @@
 
 import type { CADElement, DrawingState, Point } from './types';
 import { getBlock } from '../data/blocks';
+import { sampleSpline } from './spline';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -583,6 +584,21 @@ function elementToEntities(el: CADElement, layerName: string): string[] {
     case 'polyline': {
       if (el.points.length < 2) break;
       const pts: Array<[number, number]> = el.points.map((p) => [
+        canvasXToDXF(p.x),
+        canvasYToDXF(p.y),
+      ]);
+      entities.push(entityLWPolyline(pts, !!el.closed, layerName));
+      break;
+    }
+
+    case 'spline': {
+      // The DXF SPLINE entity carries knot vectors + weights — not worth
+      // the complexity for v1. Sample the curve into a polyline (12 pts
+      // per segment matches what the renderer shows visually) and emit
+      // as LWPOLYLINE. Every consumer handles polylines fine.
+      if (el.controlPoints.length < 2) break;
+      const sampled = sampleSpline(el.controlPoints, !!el.closed, el.tension, 12);
+      const pts: Array<[number, number]> = sampled.map((p) => [
         canvasXToDXF(p.x),
         canvasYToDXF(p.y),
       ]);

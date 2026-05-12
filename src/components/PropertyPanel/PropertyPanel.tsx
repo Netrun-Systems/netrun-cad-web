@@ -314,6 +314,34 @@ function renderElementBody(
         </>
       );
 
+    case 'spline':
+      return (
+        <>
+          <SizeReadout label="Control pts" value={String(element.controlPoints.length)} />
+          <FieldRow label="Color">
+            <ColorField value={element.strokeColor} onChange={(v) => onUpdate({ ...element, strokeColor: v ?? '#ffffff' })} />
+          </FieldRow>
+          <FieldRow label="Width">
+            <SliderField value={element.strokeWidth} onChange={(v) => onUpdate({ ...element, strokeWidth: v })} min={1} max={8} />
+          </FieldRow>
+          <FieldRow label="Tension">
+            <SliderField
+              value={Math.round((element.tension ?? 0.5) * 100)}
+              onChange={(v) => onUpdate({ ...element, tension: v / 100 })}
+              min={0} max={100}
+            />
+          </FieldRow>
+          <FieldRow label="Closed">
+            <input
+              type="checkbox"
+              checked={!!element.closed}
+              onChange={(e) => onUpdate({ ...element, closed: e.target.checked })}
+              className="w-4 h-4 accent-cad-highlight"
+            />
+          </FieldRow>
+        </>
+      );
+
     case 'text':
       return (
         <>
@@ -422,6 +450,7 @@ function elementLabel(element: CADElement): string {
     case 'arc': return 'Arc';
     case 'ellipse': return 'Ellipse';
     case 'polyline': return 'Polyline';
+    case 'spline': return 'Spline';
     case 'dimension': return 'Dimension';
     case 'freehand': return 'Freehand Stroke';
     case 'text': return 'Text';

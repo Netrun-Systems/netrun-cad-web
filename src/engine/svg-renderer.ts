@@ -19,6 +19,7 @@ import { distance, midpoint, angle } from './geometry';
 import { PLANT_DATABASE } from '../data/plants';
 import { INTERIOR_SYMBOLS } from '../data/interior-symbols';
 import { getBlock as getBlockDef } from '../data/blocks';
+import { splineToBezierSegments } from './spline';
 import { iconToSvgMarkup } from './diagram-icons';
 
 interface SVGOptions {
@@ -120,6 +121,19 @@ function blockSVG(el: import('./types').CADBlockInstance, pixelsPerUnit: number)
   ].filter(Boolean).join(' ');
   const inner = def.elements.map((child) => elementSVG(child, pixelsPerUnit)).join('');
   return `<g transform="${xforms}">${inner}</g>`;
+}
+
+function splineSVG(el: import('./types').CADSpline): string {
+  if (el.controlPoints.length < 2) return '';
+  const segments = splineToBezierSegments(el.controlPoints, !!el.closed, el.tension);
+  if (segments.length === 0) return '';
+  const start = segments[0][0];
+  const cmds = [`M ${fmt(start.x)} ${fmt(start.y)}`];
+  for (const [, b1, b2, b3] of segments) {
+    cmds.push(`C ${fmt(b1.x)} ${fmt(b1.y)} ${fmt(b2.x)} ${fmt(b2.y)} ${fmt(b3.x)} ${fmt(b3.y)}`);
+  }
+  if (el.closed) cmds.push('Z');
+  return `<path d="${cmds.join(' ')}" fill="none" stroke="${el.strokeColor}" stroke-width="${el.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>`;
 }
 
 function polylineSVG(el: import('./types').CADPolyline): string {
@@ -318,6 +332,7 @@ function elementSVG(el: CADElement, pixelsPerUnit: number): string {
     case 'arc': return arcSVG(el);
     case 'ellipse': return ellipseSVG(el);
     case 'polyline': return polylineSVG(el);
+    case 'spline': return splineSVG(el);
     case 'block': return blockSVG(el, pixelsPerUnit);
     case 'dimension': return dimensionSVG(el);
     case 'freehand': return freehandSVG(el);

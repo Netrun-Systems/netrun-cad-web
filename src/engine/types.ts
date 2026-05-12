@@ -14,7 +14,7 @@ export interface StrokePoint extends Point {
 
 export type AppMode = 'cad' | 'draw' | 'color' | 'text' | 'route' | 'diagram';
 
-export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move' | 'route' | 'polyline' | 'arc' | 'ellipse' | 'dim-aligned' | 'dim-angular' | 'dim-radius' | 'dim-diameter';
+export type CADTool = 'select' | 'line' | 'rectangle' | 'circle' | 'dimension' | 'move' | 'route' | 'polyline' | 'arc' | 'ellipse' | 'spline' | 'dim-aligned' | 'dim-angular' | 'dim-radius' | 'dim-diameter';
 
 export type DrawBrush = 'pen' | 'pencil' | 'marker';
 export type ColorBrush = 'watercolor' | 'marker' | 'fill';
@@ -143,6 +143,28 @@ export interface CADEllipse {
   strokeColor: string;
   strokeWidth: number;
   fillColor?: string;
+  metadata?: ElementMetadata;
+}
+
+/**
+ * Smooth curve through a sequence of control points. Uses Catmull-Rom
+ * interpolation: the curve passes THROUGH every control point (unlike
+ * pure Bezier where middle points are influences). Tension shapes the
+ * curve — 0.5 is the standard "uniform" Catmull-Rom; 0 gives a tighter
+ * fit, 1 looser.
+ */
+export interface CADSpline {
+  type: 'spline';
+  id: string;
+  /** Control points in order. Length >= 2 (2 = a straight segment). */
+  controlPoints: Point[];
+  /** Catmull-Rom tension. Default 0.5. */
+  tension?: number;
+  /** When true, the last segment connects back to controlPoints[0]. */
+  closed?: boolean;
+  layerId: string;
+  strokeColor: string;
+  strokeWidth: number;
   metadata?: ElementMetadata;
 }
 
@@ -315,6 +337,7 @@ export type CADElement =
   | CADPolyline
   | CADArc
   | CADEllipse
+  | CADSpline
   | CADBlockInstance
   | CADDimension
   | FreehandStroke
