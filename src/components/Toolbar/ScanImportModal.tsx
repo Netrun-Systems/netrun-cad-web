@@ -10,8 +10,7 @@
 
 import React, { useState, useCallback, useRef } from 'react';
 import type { CADElement, Layer } from '../../engine/types';
-import { parseOBJ } from '../../engine/obj-import';
-import { parsePLY } from '../../engine/ply-import';
+import { parseOBJInWorker, parsePLYInWorker } from '../../engine/scan-parser-worker';
 import { processScan, SCAN_LAYER } from '../../engine/scan-processor';
 import type { ScanOutputMode } from '../../engine/scan-processor';
 
@@ -87,16 +86,14 @@ export const ScanImportModal: React.FC<ScanImportModalProps> = ({ onImport, onCl
       const parseWarnings: string[] = [];
 
       if (ext === 'obj') {
-        setProgress('Parsing OBJ...');
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        const data = parseOBJ(text);
+        setProgress('Parsing OBJ (background thread)…');
+        const data = await parseOBJInWorker(text);
         vertices = data.vertices;
         parseWarnings.push(...data.warnings);
         setProgress(`Parsed ${data.vertexCount.toLocaleString()} vertices, ${data.faceCount.toLocaleString()} faces`);
       } else if (ext === 'ply') {
-        setProgress('Parsing PLY...');
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
-        const data = parsePLY(text);
+        setProgress('Parsing PLY (background thread)…');
+        const data = await parsePLYInWorker(text);
         vertices = data.vertices;
         parseWarnings.push(...data.warnings);
         setProgress(`Parsed ${data.vertexCount.toLocaleString()} vertices`);

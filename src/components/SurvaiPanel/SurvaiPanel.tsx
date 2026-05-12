@@ -26,8 +26,7 @@ import React, {
   useRef,
 } from 'react';
 import type { CADElement, Layer, TextElement } from '../../engine/types';
-import { parseOBJ } from '../../engine/obj-import';
-import { parsePLY } from '../../engine/ply-import';
+import { parseOBJInWorker, parsePLYInWorker } from '../../engine/scan-parser-worker';
 import { processScan, SCAN_LAYER } from '../../engine/scan-processor';
 import {
   listScans,
@@ -503,11 +502,11 @@ export const SurvaiPanel: React.FC<SurvaiPanelProps> = ({ onImport, onClose }) =
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let vertices: any[] = [];
         if (ext === 'ply') {
-          const parsed = parsePLY(text);
+          const parsed = await parsePLYInWorker(text);
           vertices = parsed.vertices;
         } else {
           // Default to OBJ parser for obj and glb (GLB text part)
-          const parsed = parseOBJ(text);
+          const parsed = await parseOBJInWorker(text);
           vertices = parsed.vertices;
         }
 

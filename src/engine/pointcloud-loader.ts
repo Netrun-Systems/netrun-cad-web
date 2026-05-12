@@ -8,7 +8,8 @@
  * the WebGL frame budget reasonable on mid-range hardware.
  */
 
-import { parsePLY, type PLYVertex } from './ply-import';
+import type { PLYVertex } from './ply-import';
+import { parsePLYInWorker } from './scan-parser-worker';
 
 export interface PointCloudData {
   positions: Float32Array; // x,y,z interleaved (length = count * 3)
@@ -24,7 +25,7 @@ const MAX_RENDER_POINTS = 500_000;
  */
 export async function parsePLYForThreeJS(file: File): Promise<PointCloudData> {
   const text = await file.text();
-  const plyData = parsePLY(text);
+  const plyData = await parsePLYInWorker(text);
 
   let vertices: PLYVertex[] = plyData.vertices;
 
