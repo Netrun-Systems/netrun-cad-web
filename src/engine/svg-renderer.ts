@@ -20,6 +20,7 @@ import { PLANT_DATABASE } from '../data/plants';
 import { INTERIOR_SYMBOLS } from '../data/interior-symbols';
 import { getBlock as getBlockDef } from '../data/blocks';
 import { splineToBezierSegments } from './spline';
+import { getIrrigationSpec as getIrrSpec, zoneColor as zoneColorSvg } from '../data/irrigation';
 import { iconToSvgMarkup } from './diagram-icons';
 
 interface SVGOptions {
@@ -134,6 +135,17 @@ function splineSVG(el: import('./types').CADSpline): string {
   }
   if (el.closed) cmds.push('Z');
   return `<path d="${cmds.join(' ')}" fill="none" stroke="${el.strokeColor}" stroke-width="${el.strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+function irrigationSVG(el: import('./types').CADIrrigationHead): string {
+  const spec = getIrrSpec(el.headType);
+  const zc = zoneColorSvg(el.zoneId);
+  const letter = el.headType === 'rotor' ? 'R' : el.headType === 'spray' ? 'S' : el.headType === 'drip' ? 'D' : 'B';
+  return [
+    `<circle cx="${fmt(el.position.x)}" cy="${fmt(el.position.y)}" r="${fmt(el.coverageRadius)}" fill="${zc}" fill-opacity="0.20" stroke="${zc}" stroke-opacity="0.6" stroke-width="1" stroke-dasharray="6 4"/>`,
+    `<circle cx="${fmt(el.position.x)}" cy="${fmt(el.position.y)}" r="5" fill="${spec.symbolColor}"/>`,
+    `<text x="${fmt(el.position.x)}" y="${fmt(el.position.y + 2.5)}" fill="#ffffff" font-family="sans-serif" font-size="7" font-weight="bold" text-anchor="middle">${letter}</text>`,
+  ].join('');
 }
 
 function polylineSVG(el: import('./types').CADPolyline): string {
@@ -334,6 +346,7 @@ function elementSVG(el: CADElement, pixelsPerUnit: number): string {
     case 'polyline': return polylineSVG(el);
     case 'spline': return splineSVG(el);
     case 'block': return blockSVG(el, pixelsPerUnit);
+    case 'irrigation': return irrigationSVG(el);
     case 'dimension': return dimensionSVG(el);
     case 'freehand': return freehandSVG(el);
     case 'text': return textSVG(el);

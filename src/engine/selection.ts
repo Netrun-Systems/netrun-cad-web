@@ -153,6 +153,14 @@ export function hitTest(element: CADElement, point: Point, zoom: number): boolea
       );
     }
 
+    case 'irrigation': {
+      // Hit on the head symbol (~6 px) — coverage circle is decorative,
+      // not interactive (would block selecting other elements underneath).
+      const dx = point.x - element.position.x;
+      const dy = point.y - element.position.y;
+      return Math.hypot(dx, dy) < tol + 6;
+    }
+
     case 'block': {
       // Treat the block instance as opaque — hit if the cursor is inside
       // the rotated, scaled bbox. Cheap point-in-rotated-rect test:
@@ -275,6 +283,8 @@ export function moveElement(element: CADElement, dx: number, dy: number): CADEle
       return { ...element, position: { x: element.position.x + dx, y: element.position.y + dy } };
     case 'block':
       return { ...element, position: { x: element.position.x + dx, y: element.position.y + dy } };
+    case 'irrigation':
+      return { ...element, position: { x: element.position.x + dx, y: element.position.y + dy } };
     case 'freehand':
       return { ...element, points: element.points.map(p => ({ ...p, x: p.x + dx, y: p.y + dy })) };
     case 'polyline':
@@ -391,6 +401,10 @@ export function scaleElement(
       const newPos = scalePoint(element.position, anchor, sx, sy);
       return { ...element, position: newPos, scale: Math.max(0.05, element.scale * avg) };
     }
+    case 'irrigation': {
+      const newPos = scalePoint(element.position, anchor, sx, sy);
+      return { ...element, position: newPos, coverageRadius: Math.max(8, element.coverageRadius * avg) };
+    }
     case 'flowchart-shape':
     case 'container': {
       const corner = { x: element.origin.x + element.width, y: element.origin.y + element.height };
@@ -491,6 +505,12 @@ export function getBoundingBox(element: CADElement): { x: number; y: number; wid
       const w = element.width * pxPerFt;
       const d = element.depth * pxPerFt;
       return { x: element.position.x - w / 2, y: element.position.y - d / 2, width: w, height: d };
+    }
+    case 'irrigation': {
+      // Use the coverage circle as the bbox so multi-select marquee picks
+      // up heads via the visible footprint, not just the tiny symbol.
+      const r = element.coverageRadius;
+      return { x: element.position.x - r, y: element.position.y - r, width: r * 2, height: r * 2 };
     }
     case 'block': {
       const def = getBlock(element.blockId);

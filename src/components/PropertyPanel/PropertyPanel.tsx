@@ -397,6 +397,22 @@ function renderElementBody(
         </>
       );
 
+    case 'irrigation': {
+      const radiusFt = Number(toFt(element.coverageRadius));
+      return (
+        <>
+          <PositionReadout x={element.position.x} y={element.position.y} />
+          <SizeReadout label="Type" value={element.headType} />
+          <FieldRow label="Zone">
+            <NumberField value={element.zoneId} onChange={(v) => onUpdate({ ...element, zoneId: Math.max(1, Math.min(8, v)) })} min={1} max={8} step={1} />
+          </FieldRow>
+          <FieldRow label="Radius">
+            <NumberField value={radiusFt} onChange={(v) => onUpdate({ ...element, coverageRadius: v * PIXELS_PER_FOOT })} min={0.5} step={0.5} unit="FT" />
+          </FieldRow>
+        </>
+      );
+    }
+
     case 'block':
       return (
         <>
@@ -456,6 +472,7 @@ function elementLabel(element: CADElement): string {
     case 'text': return 'Text';
     case 'plant': return 'Plant';
     case 'interior-symbol': return 'Interior Symbol';
+    case 'irrigation': return 'Irrigation Head';
     case 'block': return 'Block';
     case 'flowchart-shape': return 'Flowchart Shape';
     case 'container': return 'Container';

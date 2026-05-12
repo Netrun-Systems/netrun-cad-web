@@ -135,6 +135,8 @@ export const COMMANDS: Command[] = [
   { aliases: ['sched', 'schedule', 'plantlist'], action: 'panel:plant-schedule', description: 'Open plant schedule (qty, water use, export)', requiresPoints: 0, category: 'landscape' },
   { aliases: ['block', 'blocks', 'lib'], action: 'panel:blocks',         description: 'Open block library (bench, gazebo, planter, ...)', requiresPoints: 0, category: 'landscape' },
   { aliases: ['mkblock', 'makeblock', 'defblock'], action: 'block:make-from-selection', description: 'Save selected elements as a custom block', requiresPoints: 0, category: 'landscape' },
+  { aliases: ['irrigation', 'sprinkler', 'irr'], action: 'panel:irrigation', description: 'Open irrigation panel (heads, zones, coverage)', requiresPoints: 0, category: 'landscape' },
+  { aliases: ['irrsched', 'water-budget'], action: 'panel:irrigation-schedule', description: 'Open irrigation schedule (per-zone GPM)', requiresPoints: 0, category: 'landscape' },
   { aliases: ['basemap', 'sat'],        action: 'basemap:toggle',       description: 'Toggle satellite basemap',    requiresPoints: 0, category: 'landscape' },
   { aliases: ['scan'],                  action: 'file:scan',            description: 'Import 3D scan (local file)', requiresPoints: 0, category: 'landscape' },
   { aliases: ['survai', 'cloud'],       action: 'panel:survai',         description: 'Open Survai cloud scans',     requiresPoints: 0, category: 'landscape' },

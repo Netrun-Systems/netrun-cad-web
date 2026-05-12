@@ -95,6 +95,10 @@ import MultiPropertyPanel from '../PropertyPanel/MultiPropertyPanel';
 import PlantSchedulePanel from '../PlantSchedule/PlantSchedulePanel';
 import BlockLibraryPanel from '../BlockLibrary/BlockLibraryPanel';
 import MakeBlockDialog from '../BlockLibrary/MakeBlockDialog';
+import IrrigationPanel from '../Irrigation/IrrigationPanel';
+import IrrigationScheduleDialog from '../Irrigation/IrrigationScheduleDialog';
+import { defaultRadiusPx } from '../../data/irrigation';
+import type { IrrigationHeadType } from '../../engine/types';
 import { cacheProject } from '../../services/offline-storage';
 
 let plantPlaceId = 1;
@@ -171,6 +175,11 @@ export const CADCanvas: React.FC = () => {
   const [showPlantSchedule, setShowPlantSchedule] = useState(false);
   const [showBlockLibrary, setShowBlockLibrary] = useState(false);
   const [showMakeBlockDialog, setShowMakeBlockDialog] = useState(false);
+  const [showIrrigationPanel, setShowIrrigationPanel] = useState(false);
+  const [showIrrigationSchedule, setShowIrrigationSchedule] = useState(false);
+  /** Armed irrigation head — next CAD-mode click drops a head with this
+   *  type + zone. Cleared on placement or Esc. */
+  const [pendingIrrigation, setPendingIrrigation] = useState<{ headType: IrrigationHeadType; zoneId: number } | null>(null);
   /** When non-null, the next click on the canvas (in select mode) drops a
    *  block instance of this id. Cleared on placement or Esc. */
   const [pendingBlockId, setPendingBlockId] = useState<string | null>(null);
@@ -698,6 +707,8 @@ export const CADCanvas: React.FC = () => {
           if (selectedIds.size >= 2) setShowMakeBlockDialog(true);
           else setCmdHistory((h) => [...h, 'mkblock: select 2 or more elements first']);
           break;
+        case 'panel:irrigation':          setShowIrrigationPanel((s) => !s); break;
+        case 'panel:irrigation-schedule': setShowIrrigationSchedule((s) => !s); break;
         case 'basemap:toggle':  setBasemap((b) => ({ ...b, enabled: !b.enabled })); break;
         case 'file:scan':       /* handled by ImportExport */ break;
         case 'file:gis':        /* handled by ImportExport */ break;
@@ -895,6 +906,23 @@ export const CADCanvas: React.FC = () => {
   const onStrokeStart = useCallback(
     (point: StrokePoint) => {
       if (mode === 'cad') {
+        // Irrigation placement: if a head is armed (from the IrrigationPanel),
+        // any click in CAD mode drops a head with the chosen type + zone.
+        if (pendingIrrigation) {
+          const head: import('../../engine/types').CADIrrigationHead = {
+            type: 'irrigation',
+            id: `irr-${Date.now()}`,
+            position: { x: point.x, y: point.y },
+            headType: pendingIrrigation.headType,
+            coverageRadius: defaultRadiusPx(pendingIrrigation.headType),
+            zoneId: pendingIrrigation.zoneId,
+            layerId: getActiveLayer(),
+          };
+          addElement(head);
+          // Don't clear arm — landscape designs typically need many heads
+          // of the same type in a row. Esc to stop placing.
+          return;
+        }
         // Block placement: if a block is armed (from the BlockLibraryPanel),
         // any click in CAD mode drops the instance and clears the arm.
         // Takes priority over the active CAD tool so the user can browse
@@ -1019,7 +1047,7 @@ export const CADCanvas: React.FC = () => {
         }
       }
     },
-    [mode, cadTool, diagramTool, handleCADDown, handleDiagramDown, handleDrawStart, startPan, view, textInput, penColor, addElement, elements, pendingBlockId]
+    [mode, cadTool, diagramTool, handleCADDown, handleDiagramDown, handleDrawStart, startPan, view, textInput, penColor, addElement, elements, pendingBlockId, pendingIrrigation]
   );
 
   const onStrokeMove = useCallback(
@@ -1452,6 +1480,11 @@ export const CADCanvas: React.FC = () => {
           setPendingBlockId(null);
           return;
         }
+        // Pending irrigation arm cancels next
+        if (pendingIrrigation) {
+          setPendingIrrigation(null);
+          return;
+        }
 
         if (pendingInput) {
           // First Esc: cancel current operation but keep tool
@@ -1586,7 +1619,7 @@ export const CADCanvas: React.FC = () => {
 
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool, selectedElementId, nudgeSelected, cadTool, commitPolyline, commitSpline, pendingBlockId]);
+  }, [mode, cmdFocused, lastAction, toggleGrid, toggleSnap, resetView, doUndo, doRedo, doDelete, executeCommand, pendingInput, cancelPending, lastDrawTool, selectedElementId, nudgeSelected, cadTool, commitPolyline, commitSpline, pendingBlockId, pendingIrrigation]);
 
   // ── Compute canvas dimensions based on layout ────────────────────────────
   const sidePanelWidth = sidePanelCollapsed
@@ -2280,6 +2313,23 @@ export const CADCanvas: React.FC = () => {
           pendingBlockId={pendingBlockId}
           onSelectBlock={(id) => setPendingBlockId(id)}
           onClose={() => { setShowBlockLibrary(false); setPendingBlockId(null); }}
+        />
+      )}
+
+      {/* Irrigation panel + schedule */}
+      {showIrrigationPanel && (
+        <IrrigationPanel
+          pending={pendingIrrigation}
+          onArm={(next) => setPendingIrrigation(next)}
+          onOpenSchedule={() => setShowIrrigationSchedule(true)}
+          onClose={() => { setShowIrrigationPanel(false); setPendingIrrigation(null); }}
+        />
+      )}
+      {showIrrigationSchedule && (
+        <IrrigationScheduleDialog
+          elements={elements}
+          projectName={projectName}
+          onClose={() => setShowIrrigationSchedule(false)}
         />
       )}
 

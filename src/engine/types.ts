@@ -169,6 +169,26 @@ export interface CADSpline {
 }
 
 /**
+ * Irrigation head — sprinkler / emitter / bubbler placement.
+ * Coverage radius is rendered as a translucent zone-colored disc so the
+ * user can visually verify uniform coverage and detect gaps.
+ */
+export type IrrigationHeadType = 'rotor' | 'spray' | 'drip' | 'bubbler';
+
+export interface CADIrrigationHead {
+  type: 'irrigation';
+  id: string;
+  position: Point;
+  headType: IrrigationHeadType;
+  /** Coverage radius in canvas pixels (= feet × pixelsPerUnit). */
+  coverageRadius: number;
+  /** Zone group (1-8). Determines coverage color + GPM grouping. */
+  zoneId: number;
+  layerId: string;
+  metadata?: ElementMetadata;
+}
+
+/**
  * Instance of a reusable block from the catalog. The instance only stores
  * the reference (blockId) + a placement transform; the geometry lives in
  * the BlockDefinition and is resolved at render time.
@@ -339,6 +359,7 @@ export type CADElement =
   | CADEllipse
   | CADSpline
   | CADBlockInstance
+  | CADIrrigationHead
   | CADDimension
   | FreehandStroke
   | TextElement

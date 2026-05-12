@@ -24,6 +24,7 @@ import { distance, formatMeasurement, midpoint, angle } from '../../engine/geome
 import { PLANT_DATABASE } from '../../data/plants';
 import { getBlock } from '../../data/blocks';
 import { splineToBezierSegments } from '../../engine/spline';
+import { getIrrigationSpec, zoneColor } from '../../data/irrigation';
 import { INTERIOR_SYMBOLS } from '../../data/interior-symbols';
 import { renderInteriorSymbol } from '../../engine/interior-renderer';
 import { drawIconCanvas } from '../../engine/diagram-icons';
@@ -199,6 +200,39 @@ function renderEllipse(ctx: CanvasRenderingContext2D, el: CADEllipse) {
   ctx.strokeStyle = el.strokeColor;
   ctx.lineWidth = el.strokeWidth;
   ctx.stroke();
+}
+
+function renderIrrigationHead(ctx: CanvasRenderingContext2D, el: import('../../engine/types').CADIrrigationHead) {
+  const spec = getIrrigationSpec(el.headType);
+  const zc = zoneColor(el.zoneId);
+  ctx.save();
+  // Coverage disc — translucent zone color
+  ctx.globalAlpha = 0.20;
+  ctx.fillStyle = zc;
+  ctx.beginPath();
+  ctx.arc(el.position.x, el.position.y, el.coverageRadius, 0, Math.PI * 2);
+  ctx.fill();
+  // Coverage outline — dashed zone color at full opacity
+  ctx.globalAlpha = 0.6;
+  ctx.strokeStyle = zc;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([6, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+  // Head symbol — solid filled circle in the spec color
+  ctx.fillStyle = spec.symbolColor;
+  ctx.beginPath();
+  ctx.arc(el.position.x, el.position.y, 5, 0, Math.PI * 2);
+  ctx.fill();
+  // Type letter inside (R/S/D/B)
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 7px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const letter = el.headType === 'rotor' ? 'R' : el.headType === 'spray' ? 'S' : el.headType === 'drip' ? 'D' : 'B';
+  ctx.fillText(letter, el.position.x, el.position.y);
+  ctx.restore();
 }
 
 function renderBlockInstance(ctx: CanvasRenderingContext2D, el: import('../../engine/types').CADBlockInstance, grid: GridSettings) {
@@ -917,6 +951,9 @@ export function renderAll(
         break;
       case 'block':
         renderBlockInstance(ctx, el, grid);
+        break;
+      case 'irrigation':
+        renderIrrigationHead(ctx, el);
         break;
       case 'dimension':
         renderDimension(ctx, el, grid);

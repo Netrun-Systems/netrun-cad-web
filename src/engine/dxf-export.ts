@@ -606,6 +606,33 @@ function elementToEntities(el: CADElement, layerName: string): string[] {
       break;
     }
 
+    case 'irrigation': {
+      // Two circles + a label so contractors can see where heads belong
+      // and what type they are. Coverage is informational only.
+      entities.push(entityCircle(
+        canvasXToDXF(el.position.x),
+        canvasYToDXF(el.position.y),
+        pxToFt(el.coverageRadius),
+        layerName,
+      ));
+      entities.push(entityCircle(
+        canvasXToDXF(el.position.x),
+        canvasYToDXF(el.position.y),
+        pxToFt(5),
+        layerName,
+      ));
+      const letter = el.headType.charAt(0).toUpperCase() + ` Z${el.zoneId}`;
+      entities.push(entityText(
+        canvasXToDXF(el.position.x),
+        canvasYToDXF(el.position.y) - pxToFt(8),
+        letter,
+        0.15,
+        0,
+        layerName,
+      ));
+      break;
+    }
+
     case 'arc': {
       // DXF angles are degrees CCW from +X. Canvas Y points down, but the
       // DXF Y axis points up — canvasYToDXF flips Y, which also reflects
