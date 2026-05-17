@@ -1,5 +1,44 @@
 # TODO
 
+
+## 🚨 EMERGENCY (P0) — 2026-05-17 — Infra Reconciliation Audit Required
+
+**STOP** — before resuming normal roadmap work on this project, every
+agent (human or AI) MUST audit this project against the canonical
+incident report:
+
+  - Local path: `boardroom/decisions/2026-05-17-INFRA_RECONCILIATION-multi-project-changes.md`
+  - GitHub: https://github.com/Netrun-Systems/boardroom/blob/main/decisions/2026-05-17-INFRA_RECONCILIATION-multi-project-changes.md
+
+Per-service checklist to run (gate on each item before resuming roadmap):
+
+1. **Gemini / Vertex API** — does this service still call Gemini with
+   the old shared `AIzaSy*` key, or with a per-service restricted
+   key? `grep -rn 'AIzaSy[A-Za-z0-9_-]\{33\}' .` should return nothing.
+2. **Runtime service account** — is this service on
+   `<svc>-runtime-sa@gen-lang-client-0047375361.iam.gserviceaccount.com`
+   or still on `default compute SA` / `devbox-sa`? Check via
+   `gcloud run services describe <svc> --format='value(spec.template.spec.serviceAccountName)'`.
+3. **Pulse JWT** (if this project hits `/capability/dispatch`) — must
+   use `aud="pulse-frontend"`, `iss="pulse.netrunsystems.com"`, fetched
+   fresh from `pulse-jwt-signing-key-production:latest`. The misleading
+   "Signature verification failed" message is usually aud/iss
+   mismatch, not the signing key.
+4. **Cloud SQL** — is `DATABASE_URL` bound to a per-service secret
+   (`<svc>-database-url`) or the shared `database-url`? Postgres
+   password rotated 2026-05-06.
+5. **Gmail OAuth** (if this project sends mail) — currently working
+   because `netrun-gmail-campaign` was undeleted 2026-05-17, but a
+   rotation to a Charlotte-owned OAuth client is pending.
+
+After running the checklist, record findings in this project's docs/
+(brief audit note: what changed for this project, what remains, the
+verification commands run) **before** resuming any other todo item.
+
+This task supersedes other in-progress items until completed.
+
+---
+
 Tracking what's left after the May 9-11, 2026 v1-completion sprint. Everything in the whitepaper §6.1 future-work list and every "Unimplemented CAD tool" no-op shipped during that sprint; what remains is genuinely v2 territory.
 
 ## v2 — features
